@@ -12,5 +12,6 @@ macOS is the current target. Linux, Windows, and Android are future targets; the
 - [Project brief](docs/project-brief.md)
 - [Architecture](docs/architecture.md)
 - [Current status](docs/status.md)
+- [Testing](docs/testing.md)
 - [Architecture decision records](docs/decisions/README.md)
 - [Task backlog](tasks/README.md)

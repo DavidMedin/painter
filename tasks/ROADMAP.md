@@ -28,7 +28,7 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
 ## T-003 — Select and record the canvas architecture
 
 - **Priority:** P0
-- **Status:** todo
+- **Status:** done
 - **Dependencies:** T-001, T-002
 - **Outcome:** Evidence-backed choices for rendering/canvas, state management, document representation, and platform integration.
 - **Acceptance criteria:**
@@ -39,7 +39,7 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
 ## T-004 — Deliver the first macOS painting workflow
 
 - **Priority:** P0
-- **Status:** todo
+- **Status:** done
 - **Dependencies:** T-001, T-002, T-003
 - **Outcome:** An end-to-end implementation of the first painting workflow specified by T-001, excluding the save/open/export behaviors assigned to T-005.
 - **Acceptance criteria:**
