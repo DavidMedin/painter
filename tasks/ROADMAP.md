@@ -5,7 +5,7 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
 ## T-001 — Define the macOS MVP
 
 - **Priority:** P0
-- **Status:** todo
+- **Status:** done
 - **Dependencies:** none
 - **Outcome:** A product brief that resolves the first user workflow, MVP canvas interactions, document/file lifecycle, and measurable acceptance scenarios.
 - **Acceptance criteria:**
