@@ -1,0 +1,11 @@
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Release/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Debug/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Debug/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Release/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Debug/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Release/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Debug/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Debug/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Debug/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Release/painter.app
+/Users/medindj1/small-projects/painter/build/macos/Build/Products/Debug/painter.app

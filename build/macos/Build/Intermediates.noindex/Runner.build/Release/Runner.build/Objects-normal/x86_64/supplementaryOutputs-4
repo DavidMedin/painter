@@ -1,0 +1,12 @@
+{
+  "/Users/medindj1/small-projects/painter/macos/Runner/MainFlutterWindow.swift" : {
+    "abi-baseline-json" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/painter.abi.json",
+    "const-values" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/Runner-primary.swiftconstvalues",
+    "dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/Runner-primary.d",
+    "diagnostics" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/Runner-primary.dia",
+    "objc-header" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/painter-Swift.h",
+    "swiftdoc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/painter.swiftdoc",
+    "swiftmodule" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/painter.swiftmodule",
+    "swiftsourceinfo" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/Objects-normal/x86_64/painter.swiftsourceinfo"
+  }
+}

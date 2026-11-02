@@ -1,0 +1,26 @@
+{
+  "" : {
+    "const-values" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/shared_preferences_foundation-primary.swiftconstvalues",
+    "dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/shared_preferences_foundation-primary.d",
+    "diagnostics" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/shared_preferences_foundation-primary.dia",
+    "emit-module-dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/shared_preferences_foundation-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/shared_preferences_foundation-primary-emit-module.dia",
+    "pch" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/shared_preferences_foundation-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/shared_preferences_foundation-primary.swiftdeps"
+  },
+  "/Users/medindj1/.pub-cache/hosted/pub.dev/shared_preferences_foundation-2.5.7/darwin/shared_preferences_foundation/Sources/shared_preferences_foundation/SharedPreferencesPlugin.swift" : {
+    "index-unit-output-path" : "/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/SharedPreferencesPlugin.o",
+    "llvm-bc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/SharedPreferencesPlugin.bc",
+    "object" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/SharedPreferencesPlugin.o"
+  },
+  "/Users/medindj1/.pub-cache/hosted/pub.dev/shared_preferences_foundation-2.5.7/darwin/shared_preferences_foundation/Sources/shared_preferences_foundation/messages.g.swift" : {
+    "index-unit-output-path" : "/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/messages.g.o",
+    "llvm-bc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/messages.g.bc",
+    "object" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/messages.g.o"
+  },
+  "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "index-unit-output-path" : "/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/resource_bundle_accessor.bc",
+    "object" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/shared_preferences_foundation.build/Release/shared_preferences_foundation-t.build/Objects-normal/x86_64/resource_bundle_accessor.o"
+  }
+}

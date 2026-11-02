@@ -1,0 +1,4 @@
+module file_selector_macos {
+header "file_selector_macos-Swift.h"
+export *
+}

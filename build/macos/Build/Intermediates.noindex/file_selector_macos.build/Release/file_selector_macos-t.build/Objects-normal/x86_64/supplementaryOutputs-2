@@ -1,0 +1,12 @@
+{
+  "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "abi-baseline-json" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos.abi.json",
+    "const-values" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary.swiftconstvalues",
+    "dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary.d",
+    "diagnostics" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary.dia",
+    "objc-header" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-Swift.h",
+    "swiftdoc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos.swiftdoc",
+    "swiftmodule" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos.swiftmodule",
+    "swiftsourceinfo" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos.swiftsourceinfo"
+  }
+}

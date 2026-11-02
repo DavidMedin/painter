@@ -1,0 +1,1 @@
+ /Users/medindj1/small-projects/painter/.dart_tool/flutter_build/63a0b30fe3731283d64fc8a75068f7df/native_assets.json: 

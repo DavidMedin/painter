@@ -1,0 +1,26 @@
+{
+  "" : {
+    "const-values" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary.swiftconstvalues",
+    "dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary.d",
+    "diagnostics" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary.dia",
+    "emit-module-dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary-emit-module.dia",
+    "pch" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/file_selector_macos-primary.swiftdeps"
+  },
+  "/Users/medindj1/.pub-cache/hosted/pub.dev/file_selector_macos-0.9.5+2/macos/file_selector_macos/Sources/file_selector_macos/FileSelectorPlugin.swift" : {
+    "index-unit-output-path" : "/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/FileSelectorPlugin.o",
+    "llvm-bc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/FileSelectorPlugin.bc",
+    "object" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/FileSelectorPlugin.o"
+  },
+  "/Users/medindj1/.pub-cache/hosted/pub.dev/file_selector_macos-0.9.5+2/macos/file_selector_macos/Sources/file_selector_macos/messages.g.swift" : {
+    "index-unit-output-path" : "/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/messages.g.o",
+    "llvm-bc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/messages.g.bc",
+    "object" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/messages.g.o"
+  },
+  "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "index-unit-output-path" : "/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/resource_bundle_accessor.bc",
+    "object" : "/Users/medindj1/small-projects/painter/build/macos/Build/Intermediates.noindex/file_selector_macos.build/Release/file_selector_macos-t.build/Objects-normal/x86_64/resource_bundle_accessor.o"
+  }
+}
