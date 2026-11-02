@@ -17,7 +17,7 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
 ## T-002 — Bootstrap and run the macOS Flutter application
 
 - **Priority:** P0
-- **Status:** todo
+- **Status:** done
 - **Dependencies:** none
 - **Outcome:** A runnable Flutter/Dart app targeting macOS.
 - **Acceptance criteria:**
