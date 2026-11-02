@@ -19,13 +19,89 @@ class CanvasStroke {
 }
 
 class CanvasDocument {
-  CanvasDocument.empty();
+  CanvasDocument.empty() : _strokes = [];
 
-  final List<CanvasStroke> _strokes = [];
+  CanvasDocument._(this._strokes);
+
+  final List<CanvasStroke> _strokes;
 
   Iterable<CanvasStroke> get strokes => _strokes;
 
   void _addStroke(CanvasStroke stroke) => _strokes.add(stroke);
+
+  /// Format identifier stored in saved documents.
+  static const String formatIdentifier = 'painter-document';
+
+  /// Current saved-document format version.
+  static const int formatVersion = 1;
+
+  Map<String, Object?> toJson() => {
+    'format': formatIdentifier,
+    'version': formatVersion,
+    'strokes': [
+      for (final stroke in _strokes)
+        [
+          for (final point in stroke.points)
+            {
+              'x': point.position.dx,
+              'y': point.position.dy,
+              'weight': point.weight,
+            },
+        ],
+    ],
+  };
+
+  factory CanvasDocument.fromJson(Object? value) {
+    if (value is! Map<String, dynamic> ||
+        value['format'] != formatIdentifier ||
+        value['version'] != formatVersion) {
+      throw const FormatException('Unsupported Painter document format.');
+    }
+
+    final rawStrokes = value['strokes'];
+    if (rawStrokes is! List) {
+      throw const FormatException('Painter document strokes must be a list.');
+    }
+
+    final strokes = <CanvasStroke>[];
+    for (final rawStroke in rawStrokes) {
+      if (rawStroke is! List) {
+        throw const FormatException('Each Painter stroke must be a list.');
+      }
+      final points = <CanvasPoint>[];
+      for (final rawPoint in rawStroke) {
+        if (rawPoint is! Map<String, dynamic>) {
+          throw const FormatException('Each Painter point must be an object.');
+        }
+        final x = rawPoint['x'];
+        final y = rawPoint['y'];
+        final weight = rawPoint['weight'];
+        if (x is! num ||
+            y is! num ||
+            weight is! num ||
+            !x.isFinite ||
+            !y.isFinite ||
+            !weight.isFinite ||
+            weight < 0.05 ||
+            weight > 1) {
+          throw const FormatException(
+            'Painter point coordinates or weight are invalid.',
+          );
+        }
+        points.add(
+          CanvasPoint(
+            position: Offset(x.toDouble(), y.toDouble()),
+            weight: weight.toDouble(),
+          ),
+        );
+      }
+      if (points.isEmpty) {
+        throw const FormatException('Painter strokes cannot be empty.');
+      }
+      strokes.add(CanvasStroke(points));
+    }
+    return CanvasDocument._(strokes);
+  }
 }
 
 class CanvasController extends ChangeNotifier {
@@ -33,7 +109,7 @@ class CanvasController extends ChangeNotifier {
   static const double minimumZoom = 0.1;
   static const double maximumZoom = 16;
 
-  final CanvasDocument _document = CanvasDocument.empty();
+  CanvasDocument _document = CanvasDocument.empty();
   List<CanvasPoint> _activePoints = [];
   Offset _pan = Offset.zero;
   double _zoom = 1;
@@ -44,6 +120,17 @@ class CanvasController extends ChangeNotifier {
   Offset get pan => _pan;
   double get zoom => _zoom;
   double get rotation => _rotation;
+
+  /// Replaces the current document, clearing any in-progress stroke and
+  /// resetting the viewport. Used when opening a file.
+  void replaceDocument(CanvasDocument document) {
+    _document = document;
+    _activePoints = [];
+    _pan = Offset.zero;
+    _zoom = 1;
+    _rotation = 0;
+    notifyListeners();
+  }
 
   void beginStroke(Offset position, double weight) {
     _activePoints = [

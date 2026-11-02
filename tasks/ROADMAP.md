@@ -46,14 +46,14 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
   - Each T-001 first-workflow scenario passes on the macOS app.
   - Smoke-test the specific user-visible path.
 
-## T-005 — Implement saved-document and export behavior
+## T-005 — Implement saved-document behavior
 
 - **Priority:** P1
-- **Status:** todo
+- **Status:** in-progress
 - **Dependencies:** T-001, T-003, T-004
-- **Outcome:** The save/open/export behavior specified by T-001 works in the macOS app.
+- **Outcome:** The save/open behavior specified by T-001 works in the macOS app; export is explicitly out of MVP scope.
 - **Acceptance criteria:**
-  - T-001 round-trip and export scenarios pass.
+  - T-001 document round-trip scenario passes.
   - Any T-001 file-operation failure scenario produces its specified observable behavior.
 
 ## T-006 — Assess cross-platform readiness

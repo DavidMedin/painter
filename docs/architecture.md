@@ -20,11 +20,12 @@
 - **Prototype parameters:** an 8-logical-pixel brush diameter, linear normalized pressure-to-weight range `0.05`–`1.0`, and zoom limits `0.1`–`16` make the focused prototype runnable. The brush diameter and exact pressure mapping remain open production choices.
 - **Evidence and record:** widget tests cover isolated pointer behavior and the combined painting/viewport workflow; `flutter test` runs them headlessly. The Release app builds and launches. Automated tests assert model behavior rather than raster pixels. See [ADR 0001](decisions/0001-vector-canvas-and-flutter-input.md) for tradeoffs and limitations.
 
+## Document and File Architecture (T-005)
+
+- **Format:** `CanvasDocument.toJson`/`.fromJson` serialize ordered strokes of document-space points and weights to UTF-8 JSON with a `painter-document` format identifier and integer version. See [ADR 0002](decisions/0002-saved-document-format-and-flow.md).
+- **Picking:** `DocumentFileService` (in `lib/document/`) separates file I/O from path picking. The production implementation, `InAppDocumentFileService`, shows `InAppFilePicker`, an in-app dialog built from ordinary Flutter widgets (directory listing, navigation, a filename field) instead of a native file dialog or a platform plugin.
+- **Wiring:** `PainterApp` in `lib/main.dart` owns the current document path and in-flight file-operation state, and shows a details-expandable error dialog on failure without replacing the current document or crashing.
+- **Evidence and record:** because picking is ordinary Flutter UI, `flutter test` drives and verifies the full open/save flow headlessly, including the picker dialog itself (navigate, type a name, confirm, cancel); no native dialog, VM, or file-picker plugin dependency is required.
+
 ## Decisions Not Yet Made
-
-- The document file format, serialization, and save/open behavior remain assigned to T-005.
-- The 8-pixel brush diameter and linear pressure mapping are exercised prototype parameters, not artist-approved production choices; physical stylus validation remains open.
-- Input behavior on future platforms remains unverified; macOS is the only current target.
-
-Record durable technical choices in the [Architecture Decision Records](decisions/README.md) directory using its ADR convention. Do not record undecided proposals as decisions.
 

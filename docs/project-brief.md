@@ -45,6 +45,5 @@ Create painting software using Flutter and Dart.
 
 - What is the default brush size, and what exact pressure-to-size mapping should the stylus use?
 - Which mouse gestures or controls perform pan, zoom, and rotation?
-- What file format is used, and what is the detailed save flow for a new unsaved canvas?
 - What should happen when opening another file would discard unsaved changes?
 - Which errors are classified as fatal, and which logging library should be used? These implementation choices require later design/evidence.

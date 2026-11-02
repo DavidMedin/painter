@@ -11,7 +11,8 @@ void main() {
     final canvasFinder = find.byType(CanvasView);
     final controller = tester.widget<CanvasView>(canvasFinder).controller;
     final size = tester.getSize(canvasFinder);
-    final center = Offset(size.width / 2, size.height / 2);
+    final topLeft = tester.getTopLeft(canvasFinder);
+    final center = topLeft + Offset(size.width / 2, size.height / 2);
 
     final mouse = TestPointer(1, PointerDeviceKind.mouse);
     final start = center - const Offset(30, 20);
@@ -29,10 +30,10 @@ void main() {
     expect(mouseStroke.points.map((point) => point.weight), everyElement(1));
 
     await tester.sendEventToBinding(
-      const PointerDownEvent(
+      PointerDownEvent(
         pointer: 2,
         kind: PointerDeviceKind.stylus,
-        position: Offset(200, 200),
+        position: topLeft + const Offset(200, 200),
         buttons: kPrimaryButton,
         pressure: 0.2,
         pressureMin: 0,
@@ -40,11 +41,11 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(
-      const PointerMoveEvent(
+      PointerMoveEvent(
         pointer: 2,
         kind: PointerDeviceKind.stylus,
-        position: Offset(220, 210),
-        delta: Offset(20, 10),
+        position: topLeft + const Offset(220, 210),
+        delta: const Offset(20, 10),
         buttons: kPrimaryButton,
         pressure: 0.8,
         pressureMin: 0,
@@ -52,10 +53,10 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(
-      const PointerUpEvent(
+      PointerUpEvent(
         pointer: 2,
         kind: PointerDeviceKind.stylus,
-        position: Offset(220, 210),
+        position: topLeft + const Offset(220, 210),
       ),
     );
     await tester.pump();
@@ -78,7 +79,8 @@ void main() {
     expect(controller.pan, const Offset(12, 7));
 
     final zoomAnchor = center + const Offset(60, -40);
-    final documentAnchor = controller.toDocument(zoomAnchor, size);
+    final localZoomAnchor = zoomAnchor - topLeft;
+    final documentAnchor = controller.toDocument(localZoomAnchor, size);
     await tester.sendEventToBinding(
       PointerScrollEvent(
         position: zoomAnchor,
@@ -88,8 +90,8 @@ void main() {
     );
     expect(controller.zoom, greaterThan(1));
     final zoomedAnchor = controller.toScreen(documentAnchor, size);
-    expect(zoomedAnchor.dx, closeTo(zoomAnchor.dx, 0.001));
-    expect(zoomedAnchor.dy, closeTo(zoomAnchor.dy, 0.001));
+    expect(zoomedAnchor.dx, closeTo(localZoomAnchor.dx, 0.001));
+    expect(zoomedAnchor.dy, closeTo(localZoomAnchor.dy, 0.001));
 
     final rotateMouse = TestPointer(5, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(
