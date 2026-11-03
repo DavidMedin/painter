@@ -1,8 +1,82 @@
+// What: The canvas state model. `CanvasPoint`/`CanvasStroke`/`CanvasDocument`
+// hold the saved content (including its JSON format), and `CanvasController`
+// holds everything transient: viewport pan/zoom/rotation, the in-progress
+// stroke, and the screen <-> document coordinate transforms.
+//
+// Why: One place owns every mutation of canvas state, so input code
+// (canvas_view.dart), rendering (tiled_renderer.dart, tile_cache.dart) and
+// file I/O (../main.dart) all share one source of truth and none of them
+// mutates the model directly. It imports only Flutter geometry types, so it
+// has no dependency on rendering or input code; the splat generator
+// (pencil_splats.dart) and worker (splat_worker.dart) depend on it, not the
+// reverse.
+
 import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+// ---------------------------------------------------------------------------
+// Canvas state model (overview)
+//
+// What: Three kinds of state, kept deliberately apart.
+//   1. Document (`CanvasDocument`): an ordered, append-only list of immutable
+//      `CanvasStroke`s, each a list of `CanvasPoint`s (document-space
+//      position + brush weight). This is the only thing that is saved.
+//   2. Viewport (`CanvasController.pan/zoom/rotation`): how the document is
+//      looked at. Never saved, never part of the document; opening a file
+//      resets it (`replaceDocument`), and `resetViewport` resets it alone.
+//   3. Active stroke (`CanvasController.activePoints`): the stroke being drawn
+//      right now. It is not in the document until `endStroke` commits it.
+//
+// Why this split: document coordinates must not depend on the viewport
+// (ADR 0001), so panning, zooming and rotating never touch the document and
+// the tile cache (tile_cache.dart) stays valid across them. Keeping the
+// active stroke out of the document means the document only ever grows by
+// whole strokes, which is what lets `TileCache` track "strokes [0, n) are
+// already drawn into this tile" (`CachedTile.appliedStrokes`).
+//
+// Why strokes are immutable: tiles, splat buffers (`SplatWorker`) and
+// bounds are derived from a stroke once and reused for the session. A stroke
+// that could change would silently invalidate all of them.
+// `CanvasStroke` copies its points into an unmodifiable list and caches
+// `bounds` at construction.
+//
+// Seeds: a stroke's `seed` is its 1-based index in the document. Splat
+// randomness is a hash of the seed (see the overview in pencil_splats.dart),
+// so strokes tracing the same path still get different specks. The seed is
+// not saved: `fromJson` re-derives it from stroke order, which equals the
+// order they were drawn, so a saved-and-reopened document looks the same
+// (ADR 0005). The active stroke borrows `CanvasDocument.nextSeed`, so its
+// grain does not change when `endStroke` commits it. Deleting or reordering
+// strokes, if ever added, would change seeds and would need a persisted id.
+//
+// Why `ChangeNotifier` and no state-management package: the whole state is
+// one object with a handful of mutators; widgets and painters just listen
+// (`_CanvasPainter` repaints via `Listenable.merge([controller, ...])`).
+// ADR 0001 chose this to avoid a dependency while keeping mutation out of
+// widget painting code.
+//
+// Saved format (ADR 0002): UTF-8 JSON, format identifier `painter-document`,
+// integer version 1:
+//   {"format": "painter-document", "version": 1,
+//    "strokes": [[{"x": 1.0, "y": 2.0, "weight": 0.5}, ...], ...]}
+// Only document-space points and weights are stored; splats are derived at
+// paint time (ADR 0004), so no pencil-specific data is in the file. The
+// identifier and version let incompatible files be rejected instead of
+// misread. The file I/O itself lives in ../main.dart (`jsonEncode(toJson())`
+// / `CanvasDocument.fromJson(jsonDecode(...))`) and lib/document/.
+//
+// Prototype values: `brushDiameter`, the weight range 0.05-1 and the zoom
+// limits are prototype choices, not settled product values (ADR 0001,
+// docs/architecture.md "Prototype parameters").
+// ---------------------------------------------------------------------------
+
+/// One sampled input point of a stroke: a document-space [position] and a
+/// brush [weight] in 0.05-1 that scales the brush diameter.
+///
+/// The range is enforced in `CanvasController._clampWeight` for live input and
+/// in `CanvasDocument.fromJson` for loaded files; keep the two in sync.
 @immutable
 class CanvasPoint {
   const CanvasPoint({required this.position, required this.weight});
@@ -18,6 +92,11 @@ class CanvasPoint {
 /// stable for the lifetime of the document, not persisted, and re-derived when
 /// a file is opened. [bounds] is the document-space rectangle that contains
 /// every point; it does not include brush radius.
+///
+/// The constructor copies the points into an unmodifiable list and computes
+/// [bounds] once. `TileCache` inflates [bounds] by `PencilSplats.inkMargin` to
+/// decide which tiles a stroke touches, and `SplatWorker.generate` consumes
+/// [points] and [seed] to build the stroke's splats.
 @immutable
 class CanvasStroke {
   CanvasStroke(Iterable<CanvasPoint> points, {this.seed = 0})
@@ -45,6 +124,13 @@ class CanvasStroke {
   }
 }
 
+/// The saved content: an append-only list of immutable [CanvasStroke]s.
+///
+/// Only `CanvasController` appends (via the library-private `_addStroke`), and
+/// strokes are never removed or reordered. `TileCache` relies on this: it
+/// records per tile how many leading strokes are already drawn
+/// (`CachedTile.appliedStrokes`) and treats a different document *instance*
+/// (`TileCache.attach`) as the only way earlier strokes can change.
 class CanvasDocument {
   CanvasDocument.empty() : _strokes = [];
 
@@ -60,7 +146,10 @@ class CanvasDocument {
 
   void _addStroke(CanvasStroke stroke) => _strokes.add(stroke);
 
-  /// Seed the next appended stroke will receive.
+  /// Seed the next appended stroke will receive (1-based, so the first stroke
+  /// is 1). `CanvasController.endStroke` uses it for the committed stroke and
+  /// `TiledRenderer._paintActive` uses it for the in-progress stroke; they must
+  /// agree so the grain is identical before and after pointer-up.
   int get nextSeed => _strokes.length + 1;
 
   /// Format identifier stored in saved documents.
@@ -69,6 +158,8 @@ class CanvasDocument {
   /// Current saved-document format version.
   static const int formatVersion = 1;
 
+  /// Serializes to the `painter-document` JSON shape described in the
+  /// overview above (ADR 0002). Seeds and viewport are intentionally omitted.
   Map<String, Object?> toJson() => {
     'format': formatIdentifier,
     'version': formatVersion,
@@ -85,6 +176,14 @@ class CanvasDocument {
     ],
   };
 
+  /// Parses and validates a document produced by [toJson].
+  ///
+  /// Throws [FormatException] for a wrong format identifier or version, a
+  /// malformed structure, an empty stroke, or a non-finite coordinate or a
+  /// weight outside 0.05-1 (the same range as
+  /// `CanvasController._clampWeight`). Seeds are re-derived here as
+  /// `index + 1` rather than read from the file. `main.dart` reports the
+  /// exception in the error dialog without replacing the current document.
   factory CanvasDocument.fromJson(Object? value) {
     if (value is! Map<String, dynamic> ||
         value['format'] != formatIdentifier ||
@@ -138,8 +237,22 @@ class CanvasDocument {
   }
 }
 
+/// Owns the document, the viewport and the active stroke, and is the only
+/// code that mutates them. Notifies listeners after every change.
+///
+/// Coupled to `CanvasView`, which turns pointer events into calls to
+/// [beginStroke]/[extendStroke]/[endStroke], [panBy], [zoomAt] and [rotateAt],
+/// and to `_CanvasPainter`, which applies the same viewport transform that
+/// [toScreen]/[toDocument] describe. See the overview at the top of this
+/// file.
 class CanvasController extends ChangeNotifier {
+  /// Prototype brush diameter in document units (equal to logical pixels at
+  /// the default viewport). `PencilSplats` derives its disc radius and
+  /// `PencilSplats.inkMargin` from it, so changing it changes both.
   static const double brushDiameter = 8;
+
+  /// Prototype zoom limits (ADR 0001). The tile levels in `TileGrid`
+  /// (`minLevel`..`maxLevel`) are sized to span this range.
   static const double minimumZoom = 0.1;
   static const double maximumZoom = 16;
 
@@ -166,7 +279,9 @@ class CanvasController extends ChangeNotifier {
   }
 
   /// Replaces the current document, clearing any in-progress stroke and
-  /// resetting the viewport. Used when opening a file.
+  /// resetting the viewport. Used when opening a file (`_PainterAppState` in
+  /// main.dart). `TileCache.attach` sees the new instance and discards every
+  /// tile.
   void replaceDocument(CanvasDocument document) {
     _document = document;
     _setActive([]);
@@ -184,11 +299,16 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Starts a new active stroke at document-space [position]; [weight] is
+  /// clamped to 0.05-1. Called on pointer-down by `CanvasView._onPointerDown`.
   void beginStroke(Offset position, double weight) {
     _setActive([CanvasPoint(position: position, weight: _clampWeight(weight))]);
     notifyListeners();
   }
 
+  /// Appends a point to the active stroke; a no-op when no stroke is active.
+  /// The active list is mutated in place and [activePoints] is a live view of
+  /// it, so `SplatStream.extend` can consume only the new tail.
   void extendStroke(Offset position, double weight) {
     if (_activePoints.isEmpty) return;
     _activePoints.add(
@@ -197,6 +317,9 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Commits the active stroke to the document with seed
+  /// `CanvasDocument.nextSeed`, then clears the active stroke. Called from
+  /// `CanvasView._finishPointer`.
   void endStroke() {
     if (_activePoints.isEmpty) return;
     _document._addStroke(CanvasStroke(_activePoints, seed: _document.nextSeed));
@@ -204,17 +327,27 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Maps a screen (widget-local) position to document space by undoing the
+  /// viewport transform: remove pan, rotate by `-rotation` and divide by zoom,
+  /// both about the viewport centre. The inverse of [toScreen], and the same
+  /// transform `_CanvasPainter.paint` applies to the canvas.
   Offset toDocument(Offset screenPosition, Size viewportSize) {
     final center = Offset(viewportSize.width / 2, viewportSize.height / 2);
     final centered = screenPosition - center - _pan;
     return _rotate(centered, -_rotation) / _zoom + center;
   }
 
+  /// Pans by [delta] screen pixels. Pan is applied after rotation and zoom, so
+  /// it is always in screen space.
   void panBy(Offset delta) {
     _pan += delta;
     notifyListeners();
   }
 
+  /// Multiplies zoom by [factor] (clamped to [minimumZoom]..[maximumZoom]) and
+  /// adjusts pan so the document point under [screenPosition] stays under it.
+  /// Used for wheel zoom (`CanvasView._onPointerSignal`) and trackpad pinch
+  /// (`CanvasView._onPanZoomUpdate`).
   void zoomAt(Offset screenPosition, Size viewportSize, double factor) {
     final documentPosition = toDocument(screenPosition, viewportSize);
     _zoom = (_zoom * factor).clamp(minimumZoom, maximumZoom).toDouble();
@@ -222,6 +355,10 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Rotates by [delta] radians about the document point under
+  /// [screenPosition], compensating pan so that point stays put. Used for
+  /// middle-drag rotate (`CanvasView._onPointerMove`) and trackpad twist
+  /// (`CanvasView._onPanZoomUpdate`).
   void rotateAt(Offset screenPosition, Size viewportSize, double delta) {
     final documentPosition = toDocument(screenPosition, viewportSize);
     _rotation += delta;
@@ -229,6 +366,8 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Maps a document-space position to screen space; the inverse of
+  /// [toDocument].
   Offset toScreen(Offset documentPosition, Size viewportSize) {
     final center = Offset(viewportSize.width / 2, viewportSize.height / 2);
     final centered = (documentPosition - center) * _zoom;

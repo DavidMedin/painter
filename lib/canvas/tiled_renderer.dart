@@ -1,3 +1,16 @@
+// What: TiledRenderer, the per-frame painter of the document. Each frame it
+// draws the visible tiles from TileCache, falls back to other resolutions for
+// tiles that are not ready, classifies how every tile was drawn for the debug
+// stats, and draws the in-progress stroke live. It also builds the gaussian
+// sprite that every splat samples.
+// Why: painting has to be fast and must never wait on rasterization, so the
+// slow work lives in tile_cache.dart and this file only reads what is cached
+// and asks for what is missing. It owns the sprite, the cache and the
+// active-stroke stream because those share one lifetime (docs/decisions/
+// 0005-tiled-texture-cache.md; it replaced the old PencilRenderer). The
+// system overview, including how this file and tile_cache.dart, tile_grid.dart
+// and tile_stats.dart divide the work, is in tile_cache.dart.
+
 import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -17,17 +30,28 @@ import 'tile_stats.dart';
 /// instead of replaying every stroke, so frame cost tracks screen area, not
 /// document size. Missing tiles fall back to the closest cached resolution
 /// scaled to fit while the right one builds in the background.
+///
+/// Created and disposed by `_CanvasViewState` (canvas_view.dart), whose
+/// `_CanvasPainter.paint` calls [paint] every frame and repaints whenever
+/// [cache] notifies. The debug pane reaches it through `CanvasView.onRenderer`
+/// and reads [frame], [recordHistory] and [cache].
 class TiledRenderer {
   TiledRenderer() : sprite = _buildSprite() {
     cache = TileCache(sprite: sprite);
   }
 
+  /// The gaussian sprite every splat samples, shared with [cache] and the
+  /// active stroke. Its size must match `PencilSplats.spritePixels`.
   final ui.Image sprite;
   late final TileCache cache;
 
+  // The in-progress stroke is not tiled; see _paintActive. The stream keeps
+  // the splats built so far, keyed by the seed and the identity of the point
+  // list it was fed from.
   SplatStream? _activeStream;
   List<CanvasPoint>? _activeSource;
   int _activeSeed = 0;
+  // Source rectangles for drawRawAtlas; see _rectsFor.
   Float32List? _rects;
 
   /// Level of detail last used by [paint]; exposed for tests.
@@ -44,6 +68,19 @@ class TiledRenderer {
   /// [canvas] must already carry the document-to-screen transform. [visible] is
   /// the document-space rectangle on screen and [pixelsPerUnit] the on-screen
   /// size of one document unit (zoom times device pixel ratio).
+  ///
+  /// Per frame: attach the document to [cache]; choose the level with
+  /// `TileGrid.levelFor`; for each visible tile at that level, draw the cached
+  /// image (current or stale) or a fallback, ask [cache] for anything not
+  /// current, and record in [frame] how it was drawn; finally tell the cache
+  /// which tiles were used ([TileCache.setWanted], which protects them from
+  /// eviction and drops queued work for tiles no longer visible) and draw the
+  /// active stroke over the tiles. This method never builds or waits.
+  ///
+  /// Coupled to: [TileCache.attach], [TileCache.tile], [TileCache.isCurrent],
+  /// [TileCache.request], [TileCache.setWanted]; [_drawTile], [_drawFallback],
+  /// [_paintActive]; and [TileFrameStats] (every branch below bumps exactly one
+  /// of its per-tile counters and sets `draws[key]`).
   void paint(
     ui.Canvas canvas, {
     required CanvasDocument document,
@@ -53,6 +90,8 @@ class TiledRenderer {
   }) {
     final clock = Stopwatch()..start();
     cache.attach(document);
+    // Level choice must be the same one TileCache's tiles are keyed by; both
+    // sides get it from TileGrid so they cannot disagree.
     final level = TileGrid.levelFor(pixelsPerUnit);
     lastLevel = level;
     frame
@@ -60,13 +99,18 @@ class TiledRenderer {
       ..level = level
       ..visibleRect = visible;
 
+    // Tiles this frame used, including fallback sources. Handed to the cache
+    // at the end so those tiles survive eviction.
     final wanted = <TileKey>{};
     final paint = ui.Paint()..filterQuality = ui.FilterQuality.medium;
     for (final key in TileGrid.tilesIn(visible, level)) {
       wanted.add(key);
       frame.visible++;
+      // cache.tile also refreshes the tile's recency. A stale tile is returned
+      // as well and drawn below, so ink never blinks off while it updates.
       final tile = cache.tile(key);
       final current = tile != null && cache.isCurrent(key, tile);
+      // Request when missing or stale; cheap and idempotent per frame.
       if (!current) cache.request(key);
       if (tile != null) {
         _drawTile(canvas, key, tile, paint);
@@ -84,8 +128,10 @@ class TiledRenderer {
         frame.draws[key] = _drawFallback(canvas, key, paint, wanted);
       }
     }
+    // After the loop: fallback tiles were added to `wanted` while drawing.
     cache.setWanted(wanted);
 
+    // Drawn after the tiles so it sits on top; never cached as a tile.
     _paintActive(canvas, document, active);
     frame.activeSplats = _activeStream?.batch.count ?? 0;
     frame.recordMillis = clock.elapsedMicroseconds / 1000;
@@ -95,6 +141,10 @@ class TiledRenderer {
     }
   }
 
+  /// Draws [tile]'s image into the document-space rectangle of [key],
+  /// mapping the whole texture onto `TileGrid.rectOf(key)`. This is the
+  /// inverse of the mapping `TileCache._rasterize` used to produce the image.
+  /// A blank tile (no image) draws nothing.
   void _drawTile(ui.Canvas canvas, TileKey key, CachedTile tile, ui.Paint p) {
     final image = tile.image;
     if (image == null) return;
@@ -114,6 +164,14 @@ class TiledRenderer {
   /// Draws [key]'s area from the nearest cached level: the closest coarser
   /// ancestor first (one image, scaled up), otherwise cached finer children
   /// (scaled down). Only one source is used per area so ink never doubles up.
+  ///
+  /// Returns how the area was drawn so [paint] can record it. Sources used are
+  /// added to [wanted] so the cache will not evict them. The source crop is
+  /// the sub-rectangle of the ancestor's texture covering [key]'s area:
+  /// `(area - parent origin) * texturePixels / parent.width` (the ancestor's
+  /// pixels per unit, `TileGrid.scaleOf(ancestor.level)`). A cached blank
+  /// ancestor means no ink there, so it ends the search as [TileDraw.blank].
+  /// Calls [_drawFinerChildren] when no coarser level is cached.
   TileDraw _drawFallback(
     ui.Canvas canvas,
     TileKey key,
@@ -157,6 +215,10 @@ class TiledRenderer {
     return drawn;
   }
 
+  /// Draws whichever cached finer tiles cover [key]'s area, scaled down, from
+  /// the first finer level that has any (at most two levels deeper, so at most
+  /// 16 children). Children that are not cached leave their part blank.
+  /// Returns [TileDraw.finer] if anything was drawn, else [TileDraw.missing].
   TileDraw _drawFinerChildren(
     ui.Canvas canvas,
     TileKey key,
@@ -180,6 +242,16 @@ class TiledRenderer {
     return TileDraw.missing;
   }
 
+  /// Draws the in-progress stroke straight from the splats of a [SplatStream]
+  /// (not through the tile cache), extending it with only the new points each
+  /// call. Tiles get the stroke later, when it is committed to the document.
+  ///
+  /// The stream is reset when no stroke is active, when the seed changes, or
+  /// when [active] is a different list instance:
+  /// `CanvasController.activePoints` returns a new list per stroke (ADR 0005),
+  /// so identity marks a new stroke. `CanvasDocument.nextSeed` equals the seed
+  /// (`CanvasStroke.seed`) the stroke gets on commit, which is why the grain
+  /// does not change at pointer-up.
   void _paintActive(
     ui.Canvas canvas,
     CanvasDocument document,
@@ -217,6 +289,8 @@ class TiledRenderer {
     );
   }
 
+  // Same logic as TileCache._rectsFor: a reusable list of full-sprite source
+  // rectangles for drawRawAtlas, grown geometrically. Keep the two in sync.
   Float32List _rectsFor(int count) {
     var rects = _rects;
     if (rects == null || rects.length < count * 4) {
@@ -231,11 +305,17 @@ class TiledRenderer {
     return Float32List.sublistView(rects, 0, count * 4);
   }
 
+  /// Releases the cache (which disposes its worker isolate) and the sprite.
+  /// Called from `_CanvasViewState.dispose`.
   void dispose() {
     cache.dispose();
     sprite.dispose();
   }
 
+  /// Renders the gaussian sprite synchronously (`toImageSync`) so the renderer
+  /// is usable right after construction. The image is
+  /// `PencilSplats.spritePixels` square, which `TileCache._rectsFor` and
+  /// [_rectsFor] rely on when they build source rectangles.
   static ui.Image _buildSprite() {
     const size = PencilSplats.spritePixels;
     final recorder = ui.PictureRecorder();

@@ -1,3 +1,18 @@
+// What: Widget tests that feed synthetic pointer events straight into
+//   CanvasView and assert on the CanvasController: a mouse stroke's
+//   document-space points and fixed weight 1.0; a stylus stroke's
+//   pressure-to-weight mapping; and mouse pan (secondary button), wheel zoom
+//   anchored at the pointer, and middle-button rotation.
+// Why: T-003 acceptance (docs/status.md "T-003 Verification"; ADR 0001 for
+//   the controls and the prototype pressure mapping). Per ADR 0001 these
+//   tests assert document and viewport state, not raster output, and
+//   physical stylus hardware is not covered: the stylus is a synthetic
+//   PointerDeviceKind.stylus event.
+// Covers: lib/canvas/canvas_view.dart (CanvasView input handling, _weightFor)
+//   and lib/canvas/canvas_controller.dart (CanvasController, toDocument /
+//   toScreen, CanvasDocument strokes). Trackpad gestures (ADR 0003) are not
+//   tested in this file.
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +20,11 @@ import 'package:painter/canvas/canvas_controller.dart';
 import 'package:painter/canvas/canvas_view.dart';
 
 void main() {
+  // Mouse weight is always 1.0 regardless of pressure (docs/project-brief.md).
+  // Here the canvas fills the test window from the origin (no AppBar), so a
+  // local position equals a global one and the stored document-space points
+  // can be compared directly with the event positions at the unchanged
+  // default viewport.
   testWidgets('mouse stroke records document-space points at fixed weight', (
     tester,
   ) async {
@@ -30,6 +50,10 @@ void main() {
     controller.dispose();
   });
 
+  // Pressure 0.2 / 0.8 map through CanvasView._weightFor,
+  // 0.05 + 0.95 * pressure, to the expected 0.24 / 0.81 (ADR 0001 prototype
+  // values, not artist-approved). The events are built by hand so pressure,
+  // pressureMin and pressureMax can be set explicitly.
   testWidgets('stylus pressure changes stroke weight', (tester) async {
     final controller = await _pumpCanvas(tester);
     await tester.sendEventToBinding(
@@ -70,6 +94,12 @@ void main() {
     controller.dispose();
   });
 
+  // One test for the three mouse viewport controls (ADR 0001): secondary-
+  // button drag pans, vertical wheel zooms about the pointer, middle-button
+  // drag rotates. The zoom check asserts the document point under the pointer
+  // stays at the same screen position (toDocument before, toScreen after).
+  // Rotation of 50 px of drag giving 0.5 rad is the current dx / 100 rule in
+  // CanvasView.
   testWidgets('mouse buttons pan and rotate, and wheel zooms', (tester) async {
     final controller = await _pumpCanvas(tester);
     final initialSize = tester.getSize(find.byType(CanvasView));
@@ -118,6 +148,9 @@ void main() {
   });
 }
 
+/// Pumps a bare CanvasView inside Scaffold(body:) with a fresh controller and
+/// returns it; tests dispose it. No AppBar, so the canvas starts at the
+/// window origin and local coordinates equal global ones.
 Future<CanvasController> _pumpCanvas(WidgetTester tester) async {
   final controller = CanvasController();
   await tester.pumpWidget(

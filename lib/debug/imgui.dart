@@ -1,13 +1,63 @@
+// What: A small widget kit that imitates Dear ImGui's look: ImTheme, ImWindow,
+//   ImSection, ImValue, ImText, ImSeparator, ImCheckbox, ImButton,
+//   ImSliderInt, ImPlot, ImStackedBar (with ImSegment), ImLegend, and imCopy.
+//   This file is also where the kit's system overview lives (below).
+// Why: The debug pane (canvas_debug_pane.dart) wants a dense, flat,
+//   monospace "immediate-mode look" (ADR 0006). The ADR chose to write it
+//   as plain Flutter widgets with no new dependency, in a file that knows
+//   nothing about the painter. Keeping the kit apart from the pane keeps the
+//   pane file about *what* is shown and this file about *how* it looks.
+//   Only canvas_debug_pane.dart and tile_overlay.dart (for colors) import it.
+//
+// ---------------------------------------------------------------------------
+// OVERVIEW: the ImGui-style widget kit
+// ---------------------------------------------------------------------------
+// What it is: a set of ordinary retained Flutter widgets that look like Dear
+//   ImGui: a flat, monospace, dark, dense UI. It has a floating window
+//   (ImWindow) with a title bar that drags, collapses, and optionally closes;
+//   tree-style collapsible sections (ImSection); one-line widgets (ImValue
+//   label/value rows, ImText, ImSeparator, ImCheckbox, ImButton, ImSliderInt);
+//   and small visualisations (ImPlot line plot, ImStackedBar + ImLegend).
+//
+// Why it exists: ADR 0006 wanted the tile cache's internals visible in the
+//   running app in an "immediate-mode look". The ADR states the kit is NOT an
+//   immediate-mode engine and takes no dependency: it is written with
+//   ordinary Flutter widgets, which rebuild normally. The ADR does not record
+//   why an existing package or stock Material widgets were not used.
+//
+// How it works:
+//   - Retained, not immediate: the caller builds a normal widget tree every
+//     time its state changes. The kit keeps only UI state (window offset and
+//     collapsed flag, section open flag, hover flags). Values, checkbox
+//     states, and slider positions are owned by the caller and passed in; a
+//     widget reports changes through onChanged / onPressed.
+//   - Windows: ImWindow fills its parent Stack to measure it, then places a
+//     fixed-width panel at a stored offset. Dragging the title bar updates the
+//     offset, always clamped so the whole title bar (and close button) stays
+//     inside the container, even after the container is resized. Content is a
+//     SingleChildScrollView limited by maxHeight.
+//   - Sections: ImSection keeps its open flag in State, so it survives parent
+//     rebuilds (the pane rebuilds every refresh).
+//   - Plots: ImPlot paints the samples with a CustomPainter, scaled to the
+//     largest sample unless scaleMax is given, and prints min/avg/max under
+//     it. ImStackedBar normalises its segments' weights into flex widths.
+//   - Accessibility: each widget wraps itself in Semantics with a text label
+//     (windows, buttons, checkbox, slider increase/decrease, plot summary), so
+//     widget tests can find controls by label.
+//   - Painter-agnostic: nothing here imports the canvas or painter code. The
+//     only coupling is by callers: canvas_debug_pane.dart composes these
+//     widgets, and tile_overlay.dart borrows ImTheme colors so overlay tints
+//     match the pane's legend.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// A small widget kit that imitates the look and feel of Dear ImGui: a dense,
-/// flat, monospace UI made of draggable windows, collapsible tree headers, and
-/// one-line widgets (label/value rows, checkboxes, sliders, buttons, plots).
-///
-/// Nothing here knows about the painter; it is reusable by any debug tool.
+/// Colors, metrics, and the shared monospace [TextStyle] of the kit. Every
+/// widget in this file reads its look from here, so restyling the kit means
+/// editing only this class. [good], [warn], and [bad] are also used by callers
+/// for value coloring (canvas_debug_pane.dart) and by `tileDrawColor` in
+/// tile_overlay.dart.
 class ImTheme {
   const ImTheme._();
 
@@ -49,11 +99,13 @@ class ImTheme {
   static TextStyle get dim => style.copyWith(color: textDim);
 }
 
-/// A floating, draggable, collapsible, resizable-width tool window.
+/// A floating, draggable, collapsible tool window of fixed [width].
 ///
 /// Place it inside a [Stack]; it positions itself with its own offset and moves
-/// when its title bar is dragged. Collapse by tapping the arrow or
-/// double-tapping the title bar.
+/// when its title bar is dragged, staying inside the Stack's bounds. Collapse
+/// by tapping the arrow or double-tapping the title text. The title bar's
+/// gesture layout (and why the double-tap recognizer is on the text only) is
+/// explained in [_ImWindowState._titleBar].
 class ImWindow extends StatefulWidget {
   const ImWindow({
     super.key,
@@ -70,8 +122,14 @@ class ImWindow extends StatefulWidget {
   final Offset initialOffset;
   final double width;
 
-  /// Content scrolls beyond this height; null fits the content to the screen.
+  /// Content scrolls beyond this height. When null the window uses the room
+  /// left in its container below the window's top edge (at least 80 logical
+  /// pixels), so a tall pane scrolls instead of running off screen.
   final double? maxHeight;
+
+  /// When non-null a close button is shown in the title bar and calls this.
+  /// The window does not hide itself; the owner removes it from the tree
+  /// (see CanvasDebugPane.onClose, wired to the F3 toggle in lib/main.dart).
   final VoidCallback? onClose;
 
   @override
@@ -83,7 +141,8 @@ class _ImWindowState extends State<ImWindow> {
   bool _collapsed = false;
 
   // Size of the area the window floats in, from the latest layout. Dragging
-  // clamps against it so the stored offset never drifts off screen.
+  // clamps against it so the stored offset never drifts off screen. Starts
+  // infinite (no clamping) until the first layout measures the container.
   Size _bounds = Size.infinite;
 
   /// Keeps the whole title bar (and its close button) inside [bounds], even
@@ -102,6 +161,10 @@ class _ImWindowState extends State<ImWindow> {
     );
   }
 
+  /// Fills the parent [Stack] (Positioned.fill + LayoutBuilder) purely to
+  /// learn its size, then places the window inside it at the clamped offset.
+  /// The measured size is kept in [_bounds] so drag updates clamp against the
+  /// same area that was last laid out.
   @override
   Widget build(BuildContext context) {
     // Fill the parent Stack so we can measure it, then place the window inside.
@@ -128,6 +191,10 @@ class _ImWindowState extends State<ImWindow> {
     );
   }
 
+  /// The visible panel: border, title bar, and (unless collapsed) a scrollable
+  /// content column capped at [maxHeight]. When collapsed the children are not
+  /// built at all, which discards the State of widgets inside (see
+  /// [ImSection]).
   Widget _window(double maxHeight) {
     return Semantics(
       label: 'Debug window ${widget.title}',
@@ -162,6 +229,13 @@ class _ImWindowState extends State<ImWindow> {
     );
   }
 
+  /// Title bar: drag handle, collapse arrow, title text, optional close.
+  ///
+  /// Dragging uses the whole bar (onPanUpdate, clamped by [_clamped]). The
+  /// arrow and close button handle single taps through InkWell. The
+  /// double-tap recognizer is attached to the title text only: on the whole
+  /// bar it delayed single taps on the arrow and close button by about 300 ms
+  /// (ADR 0006, Consequences).
   Widget _titleBar() {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -217,6 +291,12 @@ class _ImWindowState extends State<ImWindow> {
 }
 
 /// A collapsible `CollapsingHeader` / `TreeNode`. State survives rebuilds.
+///
+/// The open flag lives in this widget's State, so the pane's periodic
+/// rebuilds (canvas_debug_pane.dart) do not reset it. It does NOT survive
+/// the enclosing [ImWindow] being collapsed: a collapsed window drops its
+/// content subtree, so sections inside restart at [initiallyOpen] when the
+/// window is expanded again.
 class ImSection extends StatefulWidget {
   const ImSection({
     super.key,
@@ -290,7 +370,8 @@ class _ImSectionState extends State<ImSection> {
   }
 }
 
-/// `LabelText`: dim label on the left, value on the right.
+/// `LabelText`: dim label on the left, value on the right. [color] tints only
+/// the value (the pane uses it for threshold coloring, e.g. `_budget`).
 class ImValue extends StatelessWidget {
   const ImValue(this.label, this.value, {super.key, this.color});
 
@@ -355,7 +436,9 @@ class ImSeparator extends StatelessWidget {
   );
 }
 
-/// `Checkbox`.
+/// `Checkbox`. Stateless about its value: shows [value] and reports the
+/// toggled value through [onChanged]; the caller stores it (the pane stores
+/// overlay switches in `CanvasDebugOptions`).
 class ImCheckbox extends StatefulWidget {
   const ImCheckbox({
     super.key,
@@ -413,7 +496,7 @@ class _ImCheckboxState extends State<ImCheckbox> {
   }
 }
 
-/// `Button`.
+/// `Button`. A null [onPressed] renders it disabled (dim, no hover, no tap).
 class ImButton extends StatefulWidget {
   const ImButton({super.key, required this.label, required this.onPressed});
 
@@ -464,8 +547,12 @@ class _ImButtonState extends State<ImButton> {
   }
 }
 
-/// `SliderInt`: a labelled, draggable integer slider that also responds to
-/// arrow keys when focused. [value] is clamped to `[min, max]`.
+/// `SliderInt`: a labelled, draggable integer slider. Tapping or dragging on
+/// the track reports the value under the pointer through [onChanged]; it is
+/// not stored here, so the caller must feed the new value back in (the pane
+/// writes `TileCache.maxInFlight` / `maxTiles` and refreshes). Accessibility
+/// increase/decrease actions step by one. [value] is clamped to `[min, max]`
+/// for display. There is no keyboard handling in this widget.
 class ImSliderInt extends StatefulWidget {
   const ImSliderInt({
     super.key,
@@ -489,6 +576,8 @@ class ImSliderInt extends StatefulWidget {
 class _ImSliderIntState extends State<ImSliderInt> {
   bool _hover = false;
 
+  /// Maps a pointer x offset within a track [width] pixels wide to a value in
+  /// `[min, max]`: position as a fraction, clamped, then rounded to an int.
   int _at(double dx, double width) {
     final t = (dx / width).clamp(0.0, 1.0);
     return (widget.min + t * (widget.max - widget.min)).round();
@@ -559,6 +648,12 @@ class _ImSliderIntState extends State<ImSliderInt> {
 }
 
 /// `PlotLines`: a sparkline of recent samples with min/avg/max readout.
+///
+/// The y axis always starts at 0 and ends at [scaleMax], or at the largest
+/// sample when [scaleMax] is null (floored at 1e-6 to avoid dividing by
+/// zero). Samples are copied out of [samples] on each build, so a live queue
+/// such as `TiledRenderer.recordHistory` would be safe to pass, but the pane
+/// passes frozen copies (see `_Reading` in canvas_debug_pane.dart).
 class ImPlot extends StatelessWidget {
   const ImPlot({
     super.key,
@@ -620,6 +715,10 @@ class ImPlot extends StatelessWidget {
   }
 }
 
+/// Paints [ImPlot]'s line: [data] spread evenly across the width, y scaled so
+/// [top] sits near the top edge and 0 at the bottom (2 px margin each side).
+/// Values above [top] are clamped to the top. Draws nothing for fewer than two
+/// samples, since a line needs two points.
 class _PlotPainter extends CustomPainter {
   _PlotPainter(this.data, this.top);
 
@@ -649,12 +748,21 @@ class _PlotPainter extends CustomPainter {
     );
   }
 
+  // Always repaints: every ImPlot build creates a new painter over a fresh
+  // sample list, and no content comparison is done.
   @override
   bool shouldRepaint(_PlotPainter old) => true;
 }
 
-/// A single-line horizontal stacked bar (`ProgressBar` with segments); each
-/// segment is `(fraction weight, color, label)` and the bar is normalised.
+/// A single-line horizontal stacked bar (`ProgressBar` with segments). The
+/// weights of [segments] are normalised, so they need not sum to 1.
+///
+/// Each positive-weight segment becomes an [Expanded] with flex proportional
+/// to its share (scaled by 1000 and rounded, at least 1, so a nonzero segment
+/// never gets zero width). Zero-weight segments are skipped and an all-zero
+/// bar is an empty frame. Labels are exposed through Semantics only; pair the
+/// bar with an [ImLegend] or [ImValue] rows to show them (the pane's "Visible
+/// tiles" section uses [ImValue] rows).
 class ImStackedBar extends StatelessWidget {
   const ImStackedBar({super.key, required this.segments, this.height = 12});
 
@@ -690,6 +798,9 @@ class ImStackedBar extends StatelessWidget {
   }
 }
 
+/// One slice of an [ImStackedBar]: [weight] is a relative size (any positive
+/// scale; the bar normalises), [color] fills the slice, and [label] is used
+/// only for the bar's accessibility description, not drawn.
 class ImSegment {
   const ImSegment(this.weight, this.color, this.label);
 
@@ -724,6 +835,7 @@ class ImLegend extends StatelessWidget {
   }
 }
 
-/// Copies [text] to the system clipboard (used by "Copy report" buttons).
+/// Copies [text] to the system clipboard. Its only caller is the pane's
+/// "Copy report" button (`_CanvasDebugPaneState._copyReport`).
 Future<void> imCopy(String text) =>
     Clipboard.setData(ClipboardData(text: text));

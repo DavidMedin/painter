@@ -1,3 +1,39 @@
+// What: Widget tests of the Open/Save lifecycle through the real PainterApp:
+//   first save, repeated save to the same path, open replacing the current
+//   document and resetting the viewport (stroke points and weights compared),
+//   and open/save failures showing the expandable-details error dialog while
+//   the current document is kept.
+// Why: Verifies the T-005 requirements in docs/project-brief.md ("Document and
+//   File Lifecycle", "Errors") and the decisions of ADR 0002: save then reopen
+//   preserves content, Save writes to the associated path after the first
+//   successful save, opening resets the viewport, and a failed file operation
+//   neither replaces the document nor terminates the app.
+// Covers: lib/main.dart (PainterApp, _openDocument, _saveDocument,
+//   _showFileOperationError), lib/document/document_file_service.dart
+//   (DocumentFileService, subclassed here), CanvasController /
+//   CanvasDocument (lib/canvas/canvas_controller.dart) round-tripping through
+//   toJson / fromJson, and CanvasView as the drawing surface.
+//
+// Overview: how the file workflow is tested
+// -----------------------------------------
+// The app's open/save logic lives in PainterApp and talks to the file system
+// only through DocumentFileService, whose two path-choosing methods need a
+// BuildContext because the production service shows the in-app picker dialog
+// (InAppFilePicker). These tests replace that service with
+// _TestDocumentFileService, which returns fixed paths under a temporary
+// directory, so they exercise the app-level flow (AppBar Save/Open buttons ->
+// service -> JSON -> controller -> error dialog) without any picker UI. The
+// picker dialog itself is tested in file_picker_dialog_test.dart. Files are
+// really written and read, in a per-test temp directory deleted in tearDown.
+//
+// Not verified here (docs/status.md T-005): the Open/Save UI in the running
+// macOS Release build (a live visual confirmation is still outstanding), the
+// default picker start directory or InAppDocumentFileService, a dirty-state
+// prompt before open discards changes (a product decision still open in
+// ADR 0002), and logging of the failures to the terminal (debugPrint in
+// _showFileOperationError is not asserted). The brief's fatal-error scenario
+// is not covered by this file.
+
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -10,6 +46,8 @@ import 'package:painter/main.dart';
 void main() {
   late Directory temporaryDirectory;
 
+  // Each test gets its own directory so saved files never leak between tests
+  // or into the repository.
   setUp(() {
     temporaryDirectory = Directory.systemTemp.createTempSync(
       'painter-document-test-',
@@ -20,6 +58,11 @@ void main() {
     temporaryDirectory.deleteSync(recursive: true);
   });
 
+  // Pins ADR 0002's "after the first successful save, Save writes to that
+  // associated path": two Save taps must ask for a path once
+  // (savePathRequests == 1 at the end). The later stroke, pan and zoom before
+  // Open are discarded by Open: the document returns to the two saved strokes
+  // and the viewport returns to pan zero / zoom 1 (replaceDocument resets it).
   testWidgets(
     'save and reopen preserves strokes and replaces current content',
     (tester) async {
@@ -79,6 +122,11 @@ void main() {
     },
   );
 
+  // Failure modes: opening a file that is not a Painter document fails inside
+  // CanvasDocument.fromJson (FormatException shown in Details); saving to a
+  // path inside a directory that does not exist fails in writeDocument. In
+  // both cases the one stroke drawn beforehand must survive, the dialog is
+  // closed with its Close button, and the app must still be present.
   testWidgets('file failures show details and preserve document content', (
     tester,
   ) async {
@@ -145,6 +193,9 @@ void main() {
   });
 }
 
+/// Draws one short mouse stroke (14 x 8 units) starting at [offset] from the
+/// canvas center. Callers pass a distinct [pointerId] per stroke so each one
+/// is a fresh TestPointer. Pumps one frame after releasing.
 Future<void> _drawStroke(
   WidgetTester tester,
   Finder canvasFinder,
@@ -164,10 +215,16 @@ Future<void> _drawStroke(
   await tester.pump();
 }
 
-/// A fake service that returns fixed paths without driving any picker UI,
-/// so these tests exercise the save/open/error-handling logic in isolation
-/// from the in-app picker dialog (covered separately by
+/// A fake DocumentFileService that returns fixed paths without driving any
+/// picker UI, so these tests exercise the save/open/error-handling logic in
+/// isolation from the in-app picker dialog (covered separately by
 /// `file_picker_dialog_test.dart`).
+///
+/// [openPath] / [savePath] are what the "user" picks (null models a cancelled
+/// picker). [savePathRequests] counts how often the app asked where to save,
+/// which is how the tests observe that later saves reuse the associated path.
+/// readDocument / writeDocument use synchronous File calls, so nothing awaits
+/// real file I/O under the widget test's pumpAndSettle.
 class _TestDocumentFileService extends DocumentFileService {
   _TestDocumentFileService({this.openPath, this.savePath});
 

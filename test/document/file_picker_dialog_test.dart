@@ -1,3 +1,21 @@
+// What: Widget tests of InAppFilePicker on its own: listing only directories
+//   and `.paint` files, open mode (tap a file, navigate into a directory),
+//   save mode (typed name gets `.paint` appended), and cancel returning null.
+// Why: ADR 0002 replaced the native file dialogs with this in-house picker so
+//   the Open/Save flow can be driven headlessly; docs/status.md (T-005) calls
+//   this file "the part that replaces the native file dialog and is exactly
+//   what could not be driven headlessly before". These tests are what make
+//   that claim true for the picker's own UI.
+// Covers: lib/document/file_picker_dialog.dart (InAppFilePicker,
+//   FilePickerMode, InAppFilePicker.show). The app-level flow that uses the
+//   picker through InAppDocumentFileService is not covered here; see
+//   document_file_workflow_test.dart (which bypasses the picker).
+//
+// Each test runs against a throwaway directory tree (see setUp) so the
+// picker's real dart:io directory listing is exercised, not a mock. Not
+// verified: the picker's default start directory in the real service, going
+// up a directory, or behavior on unreadable directories.
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +25,9 @@ import 'package:painter/document/file_picker_dialog.dart';
 void main() {
   late Directory root;
 
+  // Tree: root/{sub/nested.paint, existing.paint, ignored.txt}. The .txt file
+  // is there to exercise the extension filter; the subdirectory to exercise
+  // navigation.
   setUp(() {
     root = Directory.systemTemp.createTempSync('painter-picker-test-');
     Directory('${root.path}/sub').createSync();
@@ -21,6 +42,8 @@ void main() {
 
   /// Opens the picker and returns its (not-yet-awaited) result future, so
   /// the test can interact with the dialog before awaiting the outcome.
+  /// InAppFilePicker.show returns when the dialog closes, so awaiting it
+  /// before tapping would deadlock the test.
   Future<Future<String?>> openPicker(
     WidgetTester tester, {
     required FilePickerMode mode,

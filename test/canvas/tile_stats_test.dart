@@ -1,3 +1,19 @@
+// What: checks the diagnostics the tile pipeline records: per-frame tile
+//   classification (TileFrameStats / TileDraw), cumulative counters
+//   (TileCacheCounters), and TileCache's read accessors for tools
+//   (describeTiles, peek, imageTiles, queued, building, ...).
+// Why: TileCache is asynchronous and keeps most state private, so ADR 0006
+//   added counters and a per-frame classification for the debug pane. They
+//   must be true: every visible tile lands in exactly one bucket and the
+//   counters agree with what the cache did (full/incremental/skipped builds,
+//   evictions, queue drops). Also pins the ADR 0005 behaviors they describe.
+// Covers: lib/canvas/tile_stats.dart, and TiledRenderer.paint / TileCache
+//   (tiled_renderer.dart, tile_cache.dart), which fill them in.
+//
+// No pixels are read here (contrast tiled_renderer_test.dart): frames are
+// painted into a throwaway PictureRecorder and only the stats are checked.
+// The debug pane that shows these numbers is tested under test/debug/.
+
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -7,24 +23,31 @@ import 'package:painter/canvas/tile_grid.dart';
 import 'package:painter/canvas/tile_stats.dart';
 import 'package:painter/canvas/tiled_renderer.dart';
 
+/// A [CanvasController] disposed at teardown.
 CanvasController _controller() {
   final controller = CanvasController();
   addTearDown(controller.dispose);
   return controller;
 }
 
+/// Commits one two-point full-pressure stroke from [a] to [b].
 void _stroke(CanvasController c, Offset a, Offset b) {
   c.beginStroke(a, 1);
   c.extendStroke(b, 1);
   c.endStroke();
 }
 
+/// A fresh [TiledRenderer] (own TileCache and worker) disposed at teardown.
 TiledRenderer _renderer() {
   final renderer = TiledRenderer();
   addTearDown(renderer.dispose);
   return renderer;
 }
 
+/// Paints one frame and discards the picture; only the renderer's recorded
+/// stats ([TiledRenderer.frame], cache counters) matter. Defaults to a 200x40
+/// unit view at zoom 1, which lies inside the single tile (0, 0, level 0).
+/// Each call also issues tile requests, as a real frame would.
 void _paint(
   TiledRenderer renderer,
   CanvasDocument document, {
@@ -43,6 +66,12 @@ void _paint(
 }
 
 /// Paints until the cache is idle and one further frame has run.
+///
+/// Tiles build asynchronously (worker isolate, Picture.toImage), so this
+/// repaints, yielding to the event loop, until TileCache.idle. paint() is
+/// what requests tiles, so the extra paint after the first idle sees any
+/// request made by the previous frame (e.g. for a stale tile) before the
+/// settle is trusted. Fails if the cache never goes idle (300 x 10 ms).
 Future<void> _settle(
   TiledRenderer renderer,
   CanvasDocument document, {
@@ -67,6 +96,8 @@ Future<void> _settle(
 }
 
 void main() {
+  // Each test freezes TiledRenderer.frame right after a particular paint and
+  // checks how the visible tile at (0, 0, level 0) was classified.
   group('frame classification', () {
     test('an unbuilt tile is missing, then current once it lands', () async {
       final c = _controller();
@@ -132,6 +163,8 @@ void main() {
       },
     );
 
+    // Buckets are filled in at different moments while tiles land (30 ms
+    // between frames), so every frame is checked, not just the settled one.
     test('every visible tile is counted in exactly one bucket', () async {
       final c = _controller();
       _stroke(c, const Offset(20, 20), const Offset(1500, 900));
@@ -157,6 +190,9 @@ void main() {
     });
   });
 
+  // The cache counters are read from renderer.cache.counters. The `counters`
+  // reference is taken once and re-read after later builds because
+  // TileCache mutates the same object in place.
   group('cache counters', () {
     test('first build is full, an added stroke is incremental', () async {
       final c = _controller();
@@ -178,6 +214,9 @@ void main() {
       );
     });
 
+    // skippedBuilds: TileCache._build found no stroke touching the tile, so
+    // it recorded a blank tile (no image, no GPU raster) and advanced only
+    // its applied-stroke counter (TileBuildKind.skipped).
     test('viewing ink-free paper builds a blank tile without raster work', () async {
       final c = _controller();
       _stroke(c, const Offset(20, 20), const Offset(180, 20));
@@ -199,6 +238,9 @@ void main() {
       expect(renderer.cache.cachedTiles, 1);
     });
 
+    // TileCache.request returns early (via _hasPending) when no new stroke
+    // can touch a built tile, so a far-away stroke queues no build at all
+    // and the tile stays drawn as current.
     test(
       'a built tile that a distant stroke cannot touch is not rebuilt',
       () async {
@@ -230,6 +272,10 @@ void main() {
       expect(counters.builds, TileCacheCounters.historyLength * 2);
     });
 
+    // Lowering maxTiles does not evict at once: TileCache evicts
+    // (_evictExcess) after a completed build (ADR 0006), so the test paints
+    // an unrelated region to force one. Tiles in the last frame's working set
+    // are never evicted (ADR 0005), so only earlier-painted tiles go.
     test(
       'lowering maxTiles evicts least recently used tiles and counts them',
       () async {
@@ -259,6 +305,9 @@ void main() {
       },
     );
 
+    // maxInFlight = 1 keeps most requested tiles waiting in the queue.
+    // The second paint wants different tiles, so TileCache.setWanted drops
+    // the stale queued requests and increments droppedFromQueue.
     test('moving away drops queued requests and counts them', () async {
       final c = _controller();
       _stroke(c, const Offset(10, 10), const Offset(5000, 10));
@@ -320,6 +369,9 @@ void main() {
       expect(tiles.single.current, isFalse);
     });
 
+    // TileCache.peek is documented as not touching recency, unlike tile(), so
+    // tools can look at tiles without perturbing eviction order. setWanted is
+    // cleared so the last frame's working set shields nothing from eviction.
     test('peek does not change eviction order but tile does', () async {
       final c = _controller();
       _stroke(c, const Offset(10, 10), const Offset(1100, 10));

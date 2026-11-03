@@ -1,12 +1,46 @@
+// What: Widget tests for the ImGui-style widget kit: ImWindow (drag, clamping,
+//   collapse, close), ImSection, ImCheckbox, ImSliderInt (pointer and
+//   accessibility input), ImButton, ImPlot and ImStackedBar.
+// Why: The kit is the building block of the debug pane (ADR 0006) and is
+//   written with ordinary retained Flutter widgets, so its window drag,
+//   clamping and gesture behavior is pinned here. Two tests below are
+//   regressions for bugs that docs/status.md ("Debug Pane Verification")
+//   lists as found and fixed by tests (bugs 1 and 2); each is marked where
+//   it appears. Bug 3 (Pause) is covered in canvas_debug_pane_test.dart.
+// Covers: lib/debug/imgui.dart (ImWindow, ImSection, ImCheckbox, ImButton,
+//   ImSliderInt, ImPlot, ImStackedBar, ImSegment, ImText).
+//
+// Overview: the kit under test
+// ----------------------------
+// lib/debug/imgui.dart is a small widget kit that imitates Dear ImGui's dense,
+// flat look. It is not an immediate-mode engine and knows nothing about the
+// painter (ADR 0006), so these tests need no canvas, document or tile cache:
+// each test pumps a few kit widgets into a bare MaterialApp + Stack and drives
+// them with synthetic taps/drags (WidgetTester) or the semantics tree.
+//
+// Strategy: widget-driven and headless (docs/testing.md); positions and
+// callbacks are asserted, not pixels. Layout uses the test font (Ahem), so
+// nothing here checks glyph shapes or the Menlo typeface, theme colors, or how
+// the kit looks in a running macOS window (not verified per docs/status.md).
+// ImPlot and ImStackedBar are only checked for readout text and for not
+// throwing on degenerate data, not for what they paint. ImValue, ImSeparator
+// and ImLegend are not tested here directly (ImValue is exercised through the
+// pane tests in canvas_debug_pane_test.dart).
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/debug/imgui.dart';
 
-/// The visible window box (the host fills its container so it can measure it).
+/// Finds the window's visible box (the DecoratedBox around the title 'win')
+/// so tests can read the window's on-screen rectangle. ImWindow itself fills
+/// its parent so it can measure it; only this inner box has the window's size.
 Finder _box() => find
     .ancestor(of: find.text('win'), matching: find.byType(DecoratedBox))
     .first;
 
+/// Hosts [children] in a Stack of a known [size] (default 800x600). ImWindow
+/// is a Positioned.fill that measures its container with a LayoutBuilder, so
+/// the tests need a Stack with a definite size to make clamping predictable.
 Widget _host(List<Widget> children, {Size size = const Size(800, 600)}) {
   return MaterialApp(
     home: MediaQuery(
@@ -49,6 +83,10 @@ void main() {
     );
   });
 
+  // Regression (status.md bug 1): with a window dragged far off screen its
+  // stored offset used to keep drifting, so it could not be dragged back and
+  // its close button could become unreachable. Pins ImWindow._clamped, which
+  // clamps the stored offset in the drag handler, not just the painted one.
   testWidgets('a dragged window cannot be lost off screen', (tester) async {
     await tester.pumpWidget(
       _host([
@@ -80,6 +118,7 @@ void main() {
     expect(back.top, lessThan(rect.top));
   });
 
+  // Pins the "window wider than its container" branch of ImWindow._clamped.
   testWidgets('a window wider than the screen pins to the left edge', (
     tester,
   ) async {
@@ -98,6 +137,8 @@ void main() {
     expect(tester.getTopLeft(_box()).dx, 0);
   });
 
+  // The double-tap recognizer sits on the title text only; the arrow expands a
+  // collapsed window with a single tap.
   testWidgets('double-tapping the title collapses, the arrow expands', (
     tester,
   ) async {
@@ -120,6 +161,9 @@ void main() {
     expect(find.byIcon(Icons.arrow_drop_down), findsOneWidget);
   });
 
+  // Regression (status.md bug 2): a double-tap recognizer on the whole title
+  // bar delayed single taps on the collapse arrow and close button by about
+  // 300 ms while it waited for a possible second tap (ADR 0006).
   testWidgets(
     'arrow and close respond to a single tap with no double-tap delay',
     (tester) async {
@@ -197,6 +241,8 @@ void main() {
     expect(seen, [true]);
   });
 
+  // The bar is pointer-position driven (ImSliderInt._at): clamped at both ends,
+  // even when the drag goes far past the track.
   testWidgets('slider maps drag position to a clamped integer', (tester) async {
     final seen = <int>[];
     await tester.pumpWidget(
@@ -231,6 +277,8 @@ void main() {
     expect(seen, everyElement(inInclusiveRange(0, 10)));
   });
 
+  // The slider's Semantics (excludeSemantics: true) must stay operable for
+  // assistive tech via increase/decrease actions, not only pointer input.
   testWidgets('slider exposes increase/decrease to accessibility', (
     tester,
   ) async {
@@ -278,6 +326,10 @@ void main() {
     expect(pressed, 1);
   });
 
+  // The assertions are on the readout text; takeException guards the paint
+  // path for an empty series, a one-sample-or-fewer series and an all-zero
+  // series (ImPlot scales by max(max, 1e-6) so a flat zero plot never divides
+  // by zero).
   testWidgets('plot reports min/avg/max and tolerates empty or flat data', (
     tester,
   ) async {

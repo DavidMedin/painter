@@ -1,3 +1,37 @@
+// What: Widget tests that run the real PainterApp with the debug pane open and
+//   check that the pane's readouts, controls, overlay switches and report
+//   track the real tile cache, canvas controller and CanvasDebugOptions; plus
+//   two plain unit tests on CanvasDebugOptions and the tile-draw colors.
+// Why: The pane (ADR 0006) is the only way to observe the asynchronous tile
+//   cache (ADR 0005) in a running app, so a readout that lies or a control
+//   that does nothing defeats its purpose. docs/status.md ("Debug Pane
+//   Verification") says these tests also caught bugs; the one found here
+//   (Pause not freezing every readout) is marked on its test below.
+// Covers: lib/debug/canvas_debug_pane.dart (CanvasDebugPane and its private
+//   snapshot, report text), lib/debug/canvas_debug_options.dart,
+//   lib/debug/tile_overlay.dart (tileDrawColor), and the wiring in
+//   lib/main.dart (AppBar button, F3, CanvasView.onRenderer/debugOptions).
+//
+// Overview: how the pane is tested
+// --------------------------------
+// The pane is pure presentation: it reads a TiledRenderer and a
+// CanvasController, edits CanvasDebugOptions plus two TileCache limits
+// (maxInFlight, maxTiles), and refreshes on a 250 ms timer from one frozen
+// snapshot per refresh (ADR 0006, "Frozen snapshot"). Because it only has
+// meaning next to a live cache, these tests are widget-driven end to end:
+// PainterApp is pumped, the pane is opened with F3, strokes are drawn with
+// synthetic mouse events, and the assertions compare what the pane shows with
+// the TileCache / CanvasController / CanvasDebugOptions objects it reads.
+// The tile builds run on real asynchronous work, so helpers wait in real time
+// (see _letTilesLand). Layout uses the Ahem test font.
+//
+// Not verified here (per docs/status.md and ADR 0006): how the pane or the
+// overlays look in a running macOS window or in the Menlo font, the overhead
+// of the always-on counters, and behavior with a very large document or
+// extreme zoom. The overlay painting (paintTileOverlay) is not pixel-checked
+// in this file; only the switches the canvas reads are. The pane's window
+// mechanics (drag, clamp, collapse) are tested in imgui_test.dart.
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,8 +45,10 @@ import 'package:painter/debug/imgui.dart';
 import 'package:painter/debug/tile_overlay.dart';
 import 'package:painter/main.dart';
 
+/// The pane widget, present only while the debug pane is open.
 Finder get _pane => find.byType(CanvasDebugPane);
 
+/// The TiledRenderer the pane is reading.
 TiledRenderer _rendererOf(WidgetTester tester) {
   // The renderer is private to the view; reach it through the callback the app
   // installed by finding the pane after opening it.
@@ -29,6 +65,10 @@ String _row(WidgetTester tester, String label) {
   return value.value;
 }
 
+/// Draws one short mouse stroke (120 x 30 units) in the canvas area to the
+/// right of the pane, so the press cannot land on the pane window, which is
+/// anchored at the top-left and is 340 wide (CanvasDebugPane). Uses synthetic
+/// mouse events through the binding, like the canvas tests.
 Future<void> _drawStroke(WidgetTester tester) async {
   final canvas = find.byType(CanvasView);
   // Right of the pane (which starts at the left edge and is 340 wide).
@@ -46,6 +86,14 @@ Future<void> _drawStroke(WidgetTester tester) async {
 }
 
 /// Lets background tile builds finish; real async work needs real time.
+///
+/// Tile builds (TileCache runs splat generation in a worker and rasterizes
+/// with Picture.toImage) complete on real asynchronous work that the test's
+/// fake clock does not advance, so pump() alone would never see them land.
+/// tester.runAsync lets real time pass; the loop polls renderer.cache.idle
+/// (up to 100 x 20 ms), and each pump() runs the frame a landed tile
+/// schedules. One extra wait-and-pump after the loop lets the last landing
+/// repaint.
 Future<void> _letTilesLand(WidgetTester tester) async {
   final renderer = _rendererOf(tester);
   for (var i = 0; i < 100 && !renderer.cache.idle; i++) {
@@ -65,6 +113,8 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
+  // ADR 0006: "Hidden by default". The app must still open straight to the
+  // blank canvas (docs/project-brief.md).
   testWidgets('the pane is hidden at launch (blank canvas only)', (
     tester,
   ) async {
@@ -93,6 +143,9 @@ void main() {
     expect(_pane, findsNothing);
   });
 
+  // ADR 0006 states canvas input outside the pane is unaffected and tests it
+  // here; the second half checks the opposite: pressing the pane's own title
+  // bar drags the window and must not add a stroke.
   testWidgets(
     'drawing still works with the pane open and clicks on it do not draw',
     (tester) async {
@@ -121,6 +174,9 @@ void main() {
     },
   );
 
+  // The 'Document and splats' section starts closed (initiallyOpen: false), so
+  // the test opens it first. The 300 ms pump lets the pane's 250 ms refresh
+  // timer take a new snapshot after the tiles land.
   testWidgets('readouts follow real cache state as strokes land', (
     tester,
   ) async {
@@ -146,6 +202,11 @@ void main() {
     expect(_row(tester, 'idle'), 'yes');
   });
 
+  // Regression (status.md bug 3): the pane used to mix frozen and live reads,
+  // so Pause did not actually freeze every readout and the report could
+  // disagree with the screen. The test compares every Text widget while
+  // paused after a stroke, new tiles, a pan and more frames. It also checks
+  // options.paused after each tap so a missed tap cannot pass vacuously.
   testWidgets('pause freezes the readouts until resumed', (tester) async {
     await tester.pumpWidget(const PainterApp());
     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
@@ -183,6 +244,9 @@ void main() {
     expect(pan, '7.0, 3.0');
   });
 
+  // The expected defaults (maxInFlight 2, maxTiles 256) and slider ranges
+  // (1..8, 16..1024) mirror the pane and TileCache; if those constants change
+  // this test must change with them.
   testWidgets('sliders change the real cache limits', (tester) async {
     await tester.pumpWidget(const PainterApp());
     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
@@ -218,6 +282,10 @@ void main() {
     expect(cache.maxTiles, closeTo((16 + 1024) / 2, 8));
   });
 
+  // invalidateAll (TileCache) must clear tiles and generated splats before the
+  // next frame can re-request them, so the first assertions run before any
+  // pump. The splatsGenerated check proves the splats were rebuilt rather
+  // than reused.
   testWidgets(
     'discard-all drops every built tile and rebuilds from the document',
     (tester) async {
@@ -304,6 +372,9 @@ void main() {
     expect(find.text('coarser fallback'), findsWidgets);
   });
 
+  // imCopy writes through Clipboard.setData on SystemChannels.platform; the
+  // mock handler captures that call. The expected strings come from
+  // _Reading.report() in canvas_debug_pane.dart.
   testWidgets('copy report puts a readable summary on the clipboard', (
     tester,
   ) async {
@@ -343,6 +414,8 @@ void main() {
     expect(find.text('Report copied to clipboard'), findsOneWidget);
   });
 
+  // The pane's refresh timer is a Timer.periodic cancelled in dispose; the
+  // test harness fails a test that ends with a pending timer.
   testWidgets('the pane stops its refresh timer when closed', (tester) async {
     await tester.pumpWidget(const PainterApp());
     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
@@ -371,6 +444,7 @@ void main() {
     expect(options.anyOverlay, isFalse);
   });
 
+  // The tint legend and the canvas both take their colors from tileDrawColor.
   test('every tile draw class has a distinct colour and a name', () {
     // Guards the overlay/legend pairing: two classes sharing a colour would be
     // indistinguishable on the canvas.

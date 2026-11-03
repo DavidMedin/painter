@@ -1,3 +1,19 @@
+// What: [InAppFilePicker], a dialog built from ordinary Flutter widgets that
+// browses the file system (directories and `.paint` files only) and returns
+// the chosen absolute path. It has two modes ([FilePickerMode]): open (tap a
+// file to choose it) and save (type or pick a file name, then confirm).
+//
+// Why: Open/Save use an in-house picker instead of the platform's native file
+// dialogs so the whole flow can be driven by `flutter test` with no native UI
+// and no file-picker plugin (docs/decisions/0002-saved-document-format-and-
+// flow.md). This file is only the UI half; it never reads or writes document
+// contents.
+//
+// Coupled to: document_file_service.dart (InAppDocumentFileService is the
+// only production caller of [InAppFilePicker.show]; the overview of the whole
+// open/save system is there), and test/document/file_picker_dialog_test.dart.
+// See the overview in document_file_service.dart.
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,7 +25,10 @@ enum FilePickerMode { open, save }
 /// An in-app file browser dialog that lists directories and `.paint`
 /// documents without using the platform's native file picker.
 ///
-/// Returns the chosen absolute path, or `null` if the user cancels.
+/// Returns the chosen absolute path, or `null` if the user cancels. Used
+/// through `InAppDocumentFileService.chooseOpenPath` and `chooseSavePath`
+/// (document_file_service.dart); call [show] rather than constructing the
+/// widget directly.
 class InAppFilePicker extends StatefulWidget {
   const InAppFilePicker({
     super.key,
@@ -22,6 +41,8 @@ class InAppFilePicker extends StatefulWidget {
   final Directory startDirectory;
   final String suggestedName;
 
+  /// The only file extension the picker lists and appends on save. Must match
+  /// the `.paint` format extension of ADR 0002.
   static const String extension = '.paint';
 
   /// Shows the picker in a dialog and returns the chosen path, or `null`
@@ -46,6 +67,8 @@ class InAppFilePicker extends StatefulWidget {
   State<InAppFilePicker> createState() => _InAppFilePickerState();
 }
 
+/// One row of the directory listing: a name (not a full path) and whether it
+/// is a directory. Built by [_InAppFilePickerState._listEntries].
 class _FileEntry {
   const _FileEntry({required this.name, required this.isDirectory});
 
@@ -53,6 +76,11 @@ class _FileEntry {
   final bool isDirectory;
 }
 
+/// State for [InAppFilePicker]: tracks the directory being browsed and the
+/// file-name text field (save mode).
+///
+/// Paths are built by joining with `/`, which is correct for the current
+/// macOS target but would need revisiting for Windows.
 class _InAppFilePickerState extends State<InAppFilePicker> {
   late Directory _currentDirectory;
   late final TextEditingController _nameController;
@@ -73,6 +101,16 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
     super.dispose();
   }
 
+  /// Re-reads [_currentDirectory] and rebuilds [_entries]: every
+  /// subdirectory plus every file ending in `.paint` (case-insensitive),
+  /// directories first, then alphabetical ignoring case. Symlinks are not
+  /// followed. On failure (for example no permission) the list is cleared and
+  /// [_listError] is shown instead, so navigating into an unreadable folder
+  /// does not throw out of the dialog. Must be called after every change to
+  /// [_currentDirectory] ([_openDirectory], [_goUp], [initState]).
+  ///
+  /// Directory URIs end in `/`, so empty path segments are dropped before
+  /// taking the last one as the display name.
   void _listEntries() {
     try {
       final entries =
@@ -112,6 +150,7 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
 
   String get _currentDirectoryPath => _currentDirectory.path;
 
+  /// Descends into the subdirectory [name] of the current directory.
   void _openDirectory(String name) {
     setState(() {
       _currentDirectory = Directory('${_currentDirectory.path}/$name');
@@ -119,6 +158,8 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
     _listEntries();
   }
 
+  /// Moves to the parent directory; does nothing at the file-system root
+  /// (where the parent path equals the current path).
   void _goUp() {
     final parent = _currentDirectory.parent;
     if (parent.path == _currentDirectory.path) return;
@@ -126,10 +167,15 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
     _listEntries();
   }
 
+  /// Open mode: completes the dialog with the full path of the file [name].
   void _chooseOpenFile(String name) {
     Navigator.of(context).pop('${_currentDirectory.path}/$name');
   }
 
+  /// Save mode: completes the dialog with the typed name appended to the
+  /// current directory. Ignores an empty name, and adds `.paint` if the name
+  /// does not already end with it, so a saved document always has the format
+  /// extension. Does not ask before overwriting an existing file.
   void _confirmSave() {
     var name = _nameController.text.trim();
     if (name.isEmpty) return;
@@ -139,6 +185,10 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
     Navigator.of(context).pop('${_currentDirectory.path}/$name');
   }
 
+  /// Builds the dialog. In save mode a tapped file only fills the name field
+  /// (the user then confirms with the Save button or by submitting the
+  /// field); in open mode a tapped file completes the dialog immediately.
+  /// Tapping a directory navigates in both modes. Cancel pops with `null`.
   @override
   Widget build(BuildContext context) {
     final isSave = widget.mode == FilePickerMode.save;

@@ -1,3 +1,14 @@
+// What: `CanvasView`, the widget that turns mouse, stylus and trackpad
+// pointer events into `CanvasController` calls, and `_CanvasPainter`, which
+// draws the controller's document and viewport through a `TiledRenderer`.
+//
+// Why: Input handling and painting live here, apart from the state model
+// (canvas_controller.dart) and the tile pipeline (tiled_renderer.dart,
+// tile_cache.dart). The widget owns no document state; it is the only place
+// that knows which button or gesture means "draw", "pan", "zoom" or "rotate",
+// so changing controls (ADR 0001, ADR 0003) never touches the model or the
+// renderer.
+
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -9,6 +20,63 @@ import 'canvas_controller.dart';
 import 'tile_grid.dart';
 import 'tiled_renderer.dart';
 
+// ---------------------------------------------------------------------------
+// Input handling (overview)
+//
+// What: One `Listener` (built in `_CanvasViewState.build`) receives raw Flutter
+// pointer events and maps them to controller calls. Flutter pointer events are
+// used directly, with no native input plugin (ADR 0001).
+//
+//   Mouse (PointerDeviceKind.mouse), chosen at pointer-down by
+//   `_mouseInteraction` and fixed for the whole drag:
+//     primary button drag    -> draw at weight 1.0   (beginStroke/extendStroke)
+//     secondary button drag  -> pan                  (panBy)
+//     middle button drag     -> rotate about pointer (rotateAt, dx / 100 rad)
+//     vertical wheel         -> zoom about pointer   (zoomAt, exp(-dy / 500))
+//   If several buttons are down at once, secondary wins over middle over
+//   primary.
+//   Stylus: always draws; weight comes from pressure (below).
+//   Trackpad (PointerDeviceKind.trackpad, PointerPanZoom* events, ADR 0003):
+//     two-finger scroll -> pan   (event.panDelta)
+//     pinch             -> zoom  (cumulative event.scale -> incremental factor)
+//     two-finger twist  -> rotate (cumulative event.rotation -> incremental)
+//   Zoom and rotate are anchored at the gesture's focal point, recorded once
+//   at `_onPanZoomStart` in `_TrackpadGesture`, so the gesture stays pinned
+//   to where it began. The trackpad stream is separate from the mouse
+//   down/move/signal stream and is additive to it. The rotation sign is taken
+//   from Flutter unchanged; if it feels reversed on hardware, only the sign
+//   in `_onPanZoomUpdate` needs to change (ADR 0003).
+//   Other device kinds (e.g. touch) are ignored by `_onPointerDown`.
+//
+// Pressure -> weight (`_weightFor`): pressure is normalized with the event's
+// pressureMin/pressureMax and mapped linearly to weight 0.05-1.0. These are
+// prototype values (ADR 0001, docs/architecture.md "Prototype parameters"),
+// not a resolved product mapping, and physical stylus behavior is unverified.
+// Weight changes brush size only. `CanvasController._clampWeight` and
+// `CanvasDocument.fromJson` use the same 0.05-1 range.
+//
+// Coordinate spaces: event.localPosition is in screen (widget-local) space.
+// Strokes are stored in document space, so draw events go through
+// `CanvasController.toDocument` (which needs the viewport size, hence
+// `_viewportSize`). Pan is in screen pixels. Zoom and rotate use screen-space
+// anchors and the controller adjusts pan to keep the anchored document point
+// fixed. `_CanvasPainter.paint` applies the forward mapping to the canvas
+// (pan, then centre, rotate, scale) and must stay in sync with
+// `CanvasController.toScreen`/`toDocument`; both rotate and scale about the
+// viewport centre.
+//
+// Painting: the painter repaints when the controller changes or when the tile
+// cache finishes a tile (`renderer.cache` is a Listenable), so tiles arriving
+// asynchronously need no widget rebuild. See tile_cache.dart for that system.
+// ---------------------------------------------------------------------------
+
+/// The painting surface: draws the controller's document and handles pointer
+/// input as described in the overview above.
+///
+/// The state object owns one `TiledRenderer` (sprite, tile cache and
+/// active-stroke stream) and disposes it with the view. [onRenderer] hands
+/// that renderer to tools such as the debug pane (`_PainterAppState` in
+/// main.dart).
 class CanvasView extends StatefulWidget {
   const CanvasView({
     super.key,
@@ -30,8 +98,12 @@ class CanvasView extends StatefulWidget {
   State<CanvasView> createState() => _CanvasViewState();
 }
 
+/// What a pointer that went down is doing. Decided at pointer-down so a drag
+/// keeps its meaning even if other buttons change mid-drag.
 enum _Interaction { draw, pan, rotate }
 
+/// Input state for [CanvasView]: per-pointer interaction modes, the active
+/// trackpad gesture, and the renderer it owns.
 class _CanvasViewState extends State<CanvasView> {
   final Map<int, _PointerInteraction> _interactions = {};
   _TrackpadGesture? _trackpadGesture;
@@ -44,11 +116,17 @@ class _CanvasViewState extends State<CanvasView> {
     widget.onRenderer?.call(_renderer);
   }
 
+  /// Size of the painting surface, read from the `Listener`'s render box via
+  /// [_surfaceKey]. Needed because `CanvasController` transforms are about the
+  /// viewport centre. `Size.zero` before the first layout.
   Size get _viewportSize {
     final renderObject = _surfaceKey.currentContext?.findRenderObject();
     return renderObject is RenderBox ? renderObject.size : Size.zero;
   }
 
+  /// Starts an interaction for the pointer. Mouse buttons and stylus map to
+  /// draw/pan/rotate; other device kinds are ignored. Drawing begins the
+  /// controller's active stroke at the pointer's document-space position.
   void _onPointerDown(PointerDownEvent event) {
     final interaction = switch (event.kind) {
       PointerDeviceKind.mouse => _mouseInteraction(event.buttons),
@@ -69,6 +147,8 @@ class _CanvasViewState extends State<CanvasView> {
     }
   }
 
+  /// Picks the interaction for a mouse press; secondary > middle > primary if
+  /// several buttons are down.
   _Interaction? _mouseInteraction(int buttons) {
     if ((buttons & kSecondaryMouseButton) != 0) return _Interaction.pan;
     if ((buttons & kMiddleMouseButton) != 0) return _Interaction.rotate;
@@ -76,6 +156,10 @@ class _CanvasViewState extends State<CanvasView> {
     return null;
   }
 
+  /// Continues the pointer's interaction using the movement since the last
+  /// event: extends the stroke (document space), pans by the screen-space
+  /// delta, or rotates about the pointer by `delta.dx / 100` radians (a
+  /// horizontal drag of 100 px is 1 rad).
   void _onPointerMove(PointerMoveEvent event) {
     final interaction = _interactions[event.pointer];
     if (interaction == null) return;
@@ -99,6 +183,10 @@ class _CanvasViewState extends State<CanvasView> {
     }
   }
 
+  /// Maps a pointer event to brush weight: mouse is always 1.0; otherwise
+  /// normalized pressure maps linearly to 0.05-1.0 (prototype values, see the
+  /// overview above). A device that reports no pressure range counts as full
+  /// pressure.
   double _weightFor(PointerEvent event) {
     if (event.kind == PointerDeviceKind.mouse) return 1;
     final pressureRange = event.pressureMax - event.pressureMin;
@@ -108,6 +196,7 @@ class _CanvasViewState extends State<CanvasView> {
     return 0.05 + 0.95 * pressure.clamp(0, 1);
   }
 
+  /// Pointer up or cancel: commits the stroke if this pointer was drawing.
   void _finishPointer(PointerEvent event) {
     final interaction = _interactions.remove(event.pointer);
     if (interaction?.mode == _Interaction.draw) {
@@ -115,6 +204,9 @@ class _CanvasViewState extends State<CanvasView> {
     }
   }
 
+  /// Mouse-wheel zoom about the pointer. Scroll events from other device kinds
+  /// are ignored (trackpad scrolling arrives as `PointerPanZoom*` events
+  /// instead). A positive `scrollDelta.dy` zooms out.
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent || event.kind != PointerDeviceKind.mouse) {
       return;
@@ -126,10 +218,16 @@ class _CanvasViewState extends State<CanvasView> {
     );
   }
 
+  /// Trackpad gesture start: remembers the focal point that every zoom and
+  /// rotate in this gesture is anchored to (ADR 0003).
   void _onPanZoomStart(PointerPanZoomStartEvent event) {
     _trackpadGesture = _TrackpadGesture(event.localPosition);
   }
 
+  /// Applies one trackpad update. `scale` and `rotation` in the event are
+  /// cumulative since the gesture started, so the previous values stored in
+  /// [_TrackpadGesture] are divided/subtracted out to get per-update
+  /// increments for `CanvasController.zoomAt`/`rotateAt`.
   void _onPanZoomUpdate(PointerPanZoomUpdateEvent event) {
     final gesture = _trackpadGesture;
     if (gesture == null) return;
@@ -197,6 +295,8 @@ class _CanvasViewState extends State<CanvasView> {
   }
 }
 
+/// Tracks one active pointer: what it is doing and where it was last seen (to
+/// compute per-event deltas).
 class _PointerInteraction {
   _PointerInteraction(this.mode, this.lastPosition);
 
@@ -204,6 +304,9 @@ class _PointerInteraction {
   Offset lastPosition;
 }
 
+/// State of one trackpad pan/zoom gesture: the fixed focal point and the
+/// cumulative scale and rotation already applied, used to turn the event's
+/// cumulative values into increments.
 class _TrackpadGesture {
   _TrackpadGesture(this.focalPoint);
 
@@ -212,6 +315,12 @@ class _TrackpadGesture {
   double lastRotation = 0;
 }
 
+/// Paints the white canvas, the cached tiles and the active stroke.
+///
+/// Repaints whenever the controller (viewport, active stroke, document), the
+/// tile cache (a tile finished) or the debug options change; [shouldRepaint]
+/// only covers the constructor arguments changing. The actual tile drawing is
+/// `TiledRenderer.paint`.
 class _CanvasPainter extends CustomPainter {
   _CanvasPainter(
     this.controller,
@@ -232,11 +341,18 @@ class _CanvasPainter extends CustomPainter {
     canvas.drawColor(Colors.white, BlendMode.src);
     canvas.save();
     final center = Offset(size.width / 2, size.height / 2);
+    // The canvas transform must equal CanvasController.toScreen: translate by
+    // pan, then rotate and scale about the viewport centre. Document-space
+    // drawing below is therefore placed correctly on screen.
     canvas.translate(controller.pan.dx, controller.pan.dy);
     canvas.translate(center.dx, center.dy);
     canvas.rotate(controller.rotation);
     canvas.scale(controller.zoom);
     canvas.translate(-center.dx, -center.dy);
+    // `visible` is the document-space bounding box of the screen (all four
+    // corners mapped, so it is exact under rotation). `pixelsPerUnit` is the
+    // on-screen scale of one document unit, from which the renderer picks the
+    // tile level of detail (`TileGrid.levelFor`).
     renderer.paint(
       canvas,
       document: controller.document,

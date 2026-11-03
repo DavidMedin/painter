@@ -1,7 +1,76 @@
+// What: Pure-Dart generation of the pencil "splat" cloud for a stroke:
+// `PencilSplats` (constants, the one-shot `build`, the hash), `SplatStream`
+// (incremental generation as points are appended) and `SplatBatch` (the flat
+// output buffers). Also the primary file for the pencil splat system; see the
+// overview below.
+//
+// Why: Splat generation is the CPU-heavy part of rendering and must be
+// deterministic and independent of any GPU object so it can run in a worker
+// isolate (splat_worker.dart) and be unit-tested without a GPU (ADR 0004).
+// Keeping it separate from drawing (tiled_renderer.dart, tile_cache.dart) means
+// the look of the brush is defined in exactly one place.
+
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'canvas_controller.dart';
+
+// ---------------------------------------------------------------------------
+// Pencil splat system (overview)
+//
+// What: A splat is one tiny speck of graphite: a copy of a single soft
+// gaussian sprite (32x32 px, black, alpha following exp(-r^2 / 2); built by
+// `TiledRenderer._buildSprite`) drawn with its own position, rotation, scale
+// and opacity. A stroke is a cloud of thousands of them (about 13 per document
+// unit at full weight, ADR 0004).
+//
+// Why: The brush has to read as a pencil line from a distance while each mark
+// is a grain. The earlier renderer drew solid round-capped segments joined by
+// circles (ADR 0001), which cannot look grainy. Splats are derived at paint
+// time from the stroke's points and weights and are never stored, so the
+// saved-document format is unchanged and old `.paint` files render as pencil
+// without migration (ADR 0002, 0004). Drawing all splats of a stroke with one
+// `Canvas.drawRawAtlas` call (see `SplatBatch`) is GPU instancing instead of
+// thousands of draw calls.
+//
+// How:
+//   - `SplatStream.extend` walks each segment every `sampleSpacing` (0.5)
+//     document units, interpolating position and weight. Each sample emits
+//     round(splatsPerSample * weight) splats (at least 1) placed uniformly in
+//     a disc of radius `brushDiameter * weight / 2`, with random scale
+//     (0.5-1.5x), rotation and alpha (`minAlpha`..`maxAlpha`). Weight changes
+//     brush size only: it scales the disc and the splat count so thin strokes
+//     are not denser than thick ones.
+//   - Randomness is a counter-based hash (`PencilSplats._mix`) of
+//     (stroke seed, sample index, splat index), with no generator state. So
+//     the same stroke always gives the same specks, and appending points
+//     never moves earlier specks, because a segment's sample count depends
+//     only on its own endpoints (prefix stability).
+//   - Why determinism and prefix stability matter: a splat near a tile edge
+//     is drawn into both neighbouring tiles and must be identical in each or a
+//     seam shows; a tile rebuilt after eviction must reproduce the same
+//     specks; and the in-progress stroke, grown incrementally on the UI
+//     isolate, must look the same once committed (ADR 0005). Seeds come from
+//     `CanvasStroke.seed` (see the overview in canvas_controller.dart).
+//   - Two consumers. Committed strokes: `TileCache._splatsFor` asks
+//     `SplatWorker.generate` (splat_worker.dart), whose isolate runs
+//     `PencilSplats.build` and returns `StrokeSplats`; `TileCache._build`
+//     draws them into tile pictures. The splats are document-space, so one
+//     generation serves every tile and level of detail. The active stroke:
+//     `TiledRenderer._paintActive` keeps a `SplatStream` on the UI isolate and
+//     extends it by the new points each paint, so a pointer move costs time
+//     proportional to the new points, not the stroke length.
+//   - Isolate boundary: points go to the worker as a flat Float64List
+//     (x, y, weight per point) and the buffers come back as
+//     `TransferableTypedData`; no per-point objects are copied.
+//
+// Shared constants: `spritePixels` and the sprite source rectangles
+// (`TiledRenderer._rectsFor`, `TileCache._rectsFor`) must describe the same
+// sprite. `inkMargin` is the bound `TileCache._touches` uses to decide which
+// tiles a stroke can reach. The spacing, density, size and alpha values are
+// first-pass choices judged on offscreen renders, not reviewed by an artist
+// (ADR 0004).
+// ---------------------------------------------------------------------------
 
 /// Flat, GPU-ready buffers describing many small gaussian "pencil specks".
 ///
@@ -10,6 +79,11 @@ import 'canvas_controller.dart';
 /// into `tx, ty`) and [colors] holds one packed ARGB int per splat. All splats
 /// sample the same gaussian sprite, so a whole stroke is a single instanced
 /// draw call.
+///
+/// Produced by [SplatStream.batch] and `PencilSplats.build`. The buffers from
+/// [SplatStream.batch] are views, valid only until the stream's next
+/// [SplatStream.extend]. `StrokeSplats` (splat_worker.dart) is the same data
+/// as an owned copy received from the worker isolate.
 class SplatBatch {
   SplatBatch._(this.count, this.transforms, this.colors);
 
@@ -24,9 +98,11 @@ class SplatBatch {
 ///
 /// Splats are derived from the stroke geometry rather than stored, so the saved
 /// document format is unchanged. Every random-looking value is a pure function
-/// of (segment index, splat index), so the same stroke always produces the same
-/// specks, extending a stroke never moves earlier specks, and output is
-/// reproducible in tests.
+/// of (stroke seed, sample index, splat index), where the sample index counts
+/// samples along the stroke from its first point. So the same stroke always
+/// produces the same specks, extending a stroke never moves earlier specks,
+/// and output is reproducible in tests. See the overview at the top of this
+/// file.
 class PencilSplats {
   const PencilSplats._();
 
@@ -39,10 +115,13 @@ class PencilSplats {
   static const int splatsPerSample = 6;
 
   /// Pixel edge length of the gaussian sprite the transforms are authored
-  /// against. Must match the sprite the renderer rasterizes.
+  /// against. Must match the sprite the renderer rasterizes
+  /// (`TiledRenderer._buildSprite`) and the source rectangles passed to
+  /// `drawRawAtlas` (`TiledRenderer._rectsFor`, `TileCache._rectsFor`).
   static const int spritePixels = 32;
 
-  /// Edge length in logical pixels of the gaussian sprite quad at scale 1.
+  /// Edge length in document units of the gaussian sprite quad at scale 1
+  /// (equal to logical pixels at the default viewport).
   static const double spriteSize = 1.6;
 
   /// Splat opacity range (0-255) before gaussian falloff in the sprite.
@@ -51,6 +130,11 @@ class PencilSplats {
 
   /// Largest distance in document units from a stroke point to any ink it can
   /// produce: the brush radius plus the largest (1.5x) splat half-diagonal.
+  ///
+  /// The 0.7072 factor is about sqrt(2)/2, the half-diagonal of a square
+  /// sprite (a rotated sprite reaches that far). `TileCache._touches` inflates
+  /// stroke bounds by this value; if the brush diameter or splat scale range
+  /// changes it must stay an upper bound.
   static const double inkMargin =
       CanvasController.brushDiameter / 2 + spriteSize * 1.5 * 0.7072;
 
@@ -58,6 +142,9 @@ class PencilSplats {
   ///
   /// [strokeSeed] differentiates strokes so two strokes over the same path do
   /// not share an identical speck pattern.
+  ///
+  /// This is one [SplatStream] extended once, so there is a single generation
+  /// path. The worker isolate (`_workerMain` in splat_worker.dart) calls it.
   static SplatBatch build(List<CanvasPoint> points, {int strokeSeed = 0}) {
     final stream = SplatStream(strokeSeed);
     stream.extend(points);
@@ -94,6 +181,11 @@ class PencilSplats {
 /// Splat values are a pure function of `(seed, sampleIndex, splatIndex)`, so
 /// extending only emits the samples contributed by the new points; the
 /// resulting buffers are identical to building the whole stroke at once.
+///
+/// Used directly on the UI isolate for the in-progress stroke
+/// (`TiledRenderer._paintActive`); `PencilSplats.build` is one stream extended
+/// once. Splats are emitted sample by sample in order, so the stream only
+/// keeps the last point and counters, not the earlier points.
 class SplatStream {
   SplatStream(this.strokeSeed);
 
@@ -122,6 +214,11 @@ class SplatStream {
 
   /// Consumes `points[pointsConsumed..]`, emitting their splats. [points] must
   /// be the same growing list on every call.
+  ///
+  /// Pass 1 counts the new samples so the buffers are grown once ([_reserve]);
+  /// pass 2 emits them. Each point after the first contributes
+  /// `max(1, ceil(length / sampleSpacing))` samples, the last of which lies
+  /// exactly on the point.
   void extend(List<CanvasPoint> points) {
     if (points.length <= _pointsConsumed) return;
 
@@ -161,6 +258,8 @@ class SplatStream {
     _pointsConsumed = points.length;
   }
 
+  /// Grows the buffers to hold at least [splats] splats, doubling to keep
+  /// repeated growth amortized. Reallocation invalidates earlier [batch] views.
   void _reserve(int splats) {
     if (_colors.length >= splats) return;
     final capacity = math.max(splats, _colors.length * 2);
@@ -169,6 +268,9 @@ class SplatStream {
     _colors = Int32List(capacity)..setRange(0, _count, _colors);
   }
 
+  /// Emits the splats of one sample at ([x], [y]) with interpolated [weight].
+  /// The sample index, not the point index, feeds the hash, so output does not
+  /// depend on how points were batched across [extend] calls.
   void _emit(double x, double y, double weight) {
     // Sprite quad edge -> scale factor so scale 1 is `spriteSize` document
     // units wide, and the anchor that puts the sprite centre on the splat.

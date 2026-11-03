@@ -1,3 +1,63 @@
+// What: The debug pane widget (CanvasDebugPane) and its private snapshot type
+//   (`_Reading`). It lays out the tile-cache readouts and controls using the
+//   imgui kit and produces the plain-text report. This file also holds the
+//   debug-pane system overview (below).
+// Why: ADR 0006 wanted the tile cache's private, asynchronous state visible
+//   in the running app. The pane is the only consumer of the core's
+//   diagnostic counters (../canvas/tile_stats.dart) and is separate from them
+//   so the core never imports debug UI. Layout primitives are in imgui.dart,
+//   overlay painting in tile_overlay.dart, and shared switches in
+//   canvas_debug_options.dart.
+//
+// ---------------------------------------------------------------------------
+// OVERVIEW: the debug pane
+// ---------------------------------------------------------------------------
+// What it is: a floating tool window, hidden by default and toggled by the
+//   AppBar bug icon or F3 (lib/main.dart), that shows how the tiled texture
+//   cache (ADR 0005) is behaving: which level of detail is drawn, how every
+//   visible tile was drawn (current, stale, coarser/finer fallback, missing,
+//   blank), cache occupancy, build queue, counters, splat memory, and viewport.
+//   It also has overlays drawn inside the canvas and a few controls.
+//
+// Why it exists: the cache is asynchronous and keeps most state private, so
+//   its claims (a stale tile stays visible, a coarser level shows scaled
+//   until the right one lands, only touched tiles rebuild) could be checked
+//   only with pixel tests. The pane makes them visible in a running app,
+//   allows tuning maxInFlight / maxTiles, and gives a text report for bug
+//   reports (ADR 0006, Context).
+//
+// The boundary rule (data flows one way):
+//   - The core only RECORDS: TileCache.counters (TileCacheCounters) and
+//     TiledRenderer.frame (TileFrameStats), plus the TileCache getters.
+//     The core files (tile_cache.dart, tiled_renderer.dart, tile_stats.dart)
+//     import nothing from lib/debug; the one canvas file that does is
+//     canvas_view.dart, which imports tile_overlay.dart and
+//     canvas_debug_options.dart (not this pane).
+//   - The pane only READS those, and WRITES exactly: TileCache.maxInFlight,
+//     TileCache.maxTiles, TileCache.invalidateAll(),
+//     CanvasController.resetViewport(), and the CanvasDebugOptions switches.
+//
+// How it works:
+//   - A Timer (default every 250 ms, not per canvas frame) builds one
+//     `_Reading`, an immutable copy of every value the pane shows, and calls
+//     setState. Every readout and the text report come from that one object,
+//     so they cannot disagree, and a fast-changing counter cannot make two
+//     rows inconsistent.
+//   - Pause: while CanvasDebugOptions.paused is set, the timer tick skips
+//     replacing the reading. Because every readout reads only from it, they all
+//     freeze together, which lets you inspect a transient state such as a
+//     fallback frame. Pausing does not affect the canvas or the overlays,
+//     which read the live TiledRenderer.frame. Pane actions (sliders, buttons,
+//     Copy report) take a new reading anyway.
+//   - Report: `_Reading.report()` formats the same snapshot as plain text;
+//     the "Copy report" button refreshes, then sends it to the clipboard with
+//     imCopy.
+//   - Overlays: the pane only flips CanvasDebugOptions switches. The canvas
+//     (CanvasView's painter) calls paintTileOverlay inside the document
+//     transform. Both the overlay tint and the pane's legend/rows take their
+//     colors from tileDrawColor in tile_overlay.dart.
+//   - Cost: closed, the core still keeps its counters; open, one snapshot
+//     (and a rebuild of this widget) per timer tick.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -12,7 +72,10 @@ import 'canvas_debug_options.dart';
 import 'imgui.dart';
 import 'tile_overlay.dart';
 
-/// Bytes one cached tile texture occupies (RGBA8).
+/// Bytes one cached tile texture occupies, assuming RGBA8 (4 bytes per
+/// pixel): `TileGrid.texturePixels` squared times 4. Used for the "texture
+/// memory" row and the report line. It is an estimate computed from the tile
+/// size, not a measurement of GPU allocation.
 const int _tileBytes = TileGrid.texturePixels * TileGrid.texturePixels * 4;
 
 /// The tool window that shows the tile cache's internals and exposes a few
@@ -21,7 +84,12 @@ const int _tileBytes = TileGrid.texturePixels * TileGrid.texturePixels * 4;
 ///
 /// Readouts refresh on a short timer rather than on every canvas frame so the
 /// pane costs almost nothing while you draw, and freeze while
-/// [CanvasDebugOptions.paused] is set.
+/// [CanvasDebugOptions.paused] is set (actions the user takes in the pane
+/// itself still refresh it; see `_refreshNow`).
+///
+/// Constructed in lib/main.dart only when the F3 toggle is on and
+/// CanvasView has handed back its renderer through `onRenderer`; the system
+/// overview is at the top of this file.
 class CanvasDebugPane extends StatefulWidget {
   const CanvasDebugPane({
     super.key,
@@ -45,6 +113,9 @@ class CanvasDebugPane extends StatefulWidget {
 class _CanvasDebugPaneState extends State<CanvasDebugPane> {
   Timer? _timer;
   late _Reading _reading = _Reading.of(widget.renderer, widget.controller);
+
+  /// Status line shown under the buttons after a copy; never cleared while the
+  /// pane stays open.
   String? _notice;
 
   @override
@@ -74,25 +145,43 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
     super.dispose();
   }
 
+  /// Rebuilds when any [CanvasDebugOptions] switch changes (for example the
+  /// pause checkbox, or an overlay checkbox) so the checkboxes reflect it.
   void _onOptions() {
     if (mounted) setState(() {});
   }
 
+  /// Timer callback: replaces the snapshot unless the pane is paused (the
+  /// timer keeps running while paused; it just skips). This is the only place
+  /// the snapshot advances on its own.
   void _tick() {
     if (!mounted || widget.options.paused) return;
     setState(() => _reading = _Reading.of(widget.renderer, widget.controller));
   }
 
+  /// Takes a reading immediately, ignoring [CanvasDebugOptions.paused]. Called
+  /// after every write the pane makes to the core or the controller
+  /// (`resetViewport`, `maxInFlight`, `maxTiles`, `invalidateAll`) so the
+  /// effect is shown at once rather than at the next timer tick, and by
+  /// [_copyReport].
   void _refreshNow() => setState(
     () => _reading = _Reading.of(widget.renderer, widget.controller),
   );
 
+  /// Takes a fresh reading, then copies its text report. The refresh happens
+  /// first so the clipboard text and the numbers on screen are the same
+  /// reading; this also updates the display when readouts are paused.
   Future<void> _copyReport() async {
     _refreshNow();
     await imCopy(_reading.report());
     if (mounted) setState(() => _notice = 'Report copied to clipboard');
   }
 
+  /// One readout section per source of data; each section's comment names the
+  /// members it reads. Everything in the readouts comes from `_reading`, the
+  /// frozen snapshot; only the slider values and the checkbox values are read
+  /// live from `cache` / `options` because they are inputs the user is
+  /// editing.
   @override
   Widget build(BuildContext context) {
     final r = _reading;
@@ -104,6 +193,9 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
       width: 340,
       onClose: widget.onClose,
       children: [
+        // Frame: TileFrameStats level, recordMillis, activeSplats, and the
+        // TiledRenderer.recordHistory plot. `record time` is UI-thread time
+        // spent recording draw calls, not raster or GPU time (ADR 0006).
         ImSection(
           title: 'Frame',
           children: [
@@ -120,6 +212,9 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             ImPlot(label: 'record ms', samples: r.recordHistory, unit: 'ms'),
           ],
         ),
+        // Viewport: CanvasController zoom/rotation/pan plus the size of
+        // TileFrameStats.visibleRect. "Reset view" calls
+        // CanvasController.resetViewport().
         ImSection(
           title: 'Viewport',
           children: [
@@ -146,6 +241,12 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             ),
           ],
         ),
+        // Visible tiles: how the last frame drew each visible tile. Counts
+        // are TileFrameStats.visible and the per-state totals (drawnCurrent,
+        // drawnStale, fallbackCoarser, fallbackFiner, missing, blank), via
+        // [_Reading.draws]. The bar and rows take color and name from
+        // tileDrawColor / tileDrawName (tile_overlay.dart), the same
+        // functions the canvas overlay uses.
         ImSection(
           title: 'Visible tiles',
           children: [
@@ -168,6 +269,13 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
               ),
           ],
         ),
+        // Tile cache: TileCache getters cachedTiles, imageTiles, wantedTiles,
+        // building, queued, idle, plus maxTiles/maxInFlight and the
+        // TileCacheCounters fields. "cached tiles" can exceed its maxTiles
+        // denominator: maxTiles is a floor of the eviction budget, not a hard
+        // cap (see TileCache.maxTiles). "texture memory" is imageTiles times
+        // _tileBytes (tiles without an image take no texture). `buildHistory`
+        // is TileCacheCounters.buildMillis, which excludes skipped builds.
         ImSection(
           title: 'Tile cache',
           children: [
@@ -202,6 +310,10 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             ImPlot(label: 'tile build', samples: r.buildHistory, unit: 'ms'),
           ],
         ),
+        // Document and splats: strokes/points from the document; the rest are
+        // TileCache.generatedStrokes / splatBytes and the splatsGenerated /
+        // splatsRastered counters. The last row prints the two PencilSplats
+        // constants (splatsPerSample / sampleSpacing).
         ImSection(
           title: 'Document and splats',
           initiallyOpen: false,
@@ -218,6 +330,9 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             ),
           ],
         ),
+        // Overlays: writes CanvasDebugOptions switches; the canvas paints
+        // them via paintTileOverlay (tile_overlay.dart). The legend uses the
+        // same tileDrawColor/tileDrawName as that overlay.
         ImSection(
           title: 'Overlays',
           children: [
@@ -248,6 +363,13 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             ),
           ],
         ),
+        // Controls: the only section that writes to the core. The sliders
+        // read the live `cache.maxInFlight` / `cache.maxTiles`, not the
+        // snapshot, so the thumb follows the pointer at once; the "Tile
+        // cache" readout rows come from the snapshot. Lowering `maxTiles`
+        // evicts on the next completed build, not instantly (ADR 0006).
+        // `invalidateAll()` drops all tiles and splats but keeps the document;
+        // the canvas rebuilds them on the next frame.
         ImSection(
           title: 'Controls',
           children: [
@@ -287,11 +409,16 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             if (_notice != null) ImText(_notice!, color: ImTheme.good),
           ],
         ),
+        // Tail hint; the title-bar double-tap behavior is ImWindow's
+        // (imgui.dart).
         ImText('double-click title to collapse', dim: true),
       ],
     );
   }
 
+  /// Color for the frame record time: red above 8 ms, yellow above 2 ms,
+  /// default otherwise. The thresholds are fixed constants in this method;
+  /// the repo does not say how they were chosen.
   Color? _budget(double ms) => ms > 8
       ? ImTheme.bad
       : ms > 2
@@ -299,6 +426,8 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
       : null;
 }
 
+/// Formats a byte count as B, KiB, or MiB (binary units, one decimal). Used
+/// for the texture and splat memory rows and by [_Reading.report].
 String _bytes(int n) {
   if (n < 1024) return '$n B';
   if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KiB';
@@ -306,7 +435,9 @@ String _bytes(int n) {
 }
 
 /// An immutable copy of everything the pane shows, taken at one instant, so a
-/// paused pane and the copied report agree.
+/// paused pane and the copied report agree. Created by [_Reading.of]; the
+/// widget replaces its whole `_reading` on each refresh and never edits one.
+/// See the overview at the top of this file for why one snapshot is used.
 class _Reading {
   _Reading({
     required this.frame,
@@ -331,6 +462,16 @@ class _Reading {
     required this.draws,
   });
 
+  /// Takes the snapshot: copies every field of `renderer.frame`
+  /// (TileFrameStats) and `renderer.cache.counters` (TileCacheCounters) into
+  /// fresh objects, copies the two history queues into lists, and reads the
+  /// TileCache and CanvasController getters once.
+  ///
+  /// Coupled to those two classes (lib/canvas/tile_stats.dart): the copies
+  /// are written field by field, so a field added to TileFrameStats or
+  /// TileCacheCounters must also be copied here or the pane will silently show
+  /// zero for it. `TileFrameStats.draws` is deliberately not copied; the
+  /// [draws] map of per-state counts is rebuilt from the copied counters.
   factory _Reading.of(TiledRenderer renderer, CanvasController controller) {
     final cache = renderer.cache;
     final f = renderer.frame;
@@ -357,10 +498,15 @@ class _Reading {
       ..droppedFromQueue = c.droppedFromQueue
       ..splatsGenerated = c.splatsGenerated
       ..splatsRastered = c.splatsRastered;
+    // Counts every point of every stroke on each refresh, so this costs time
+    // proportional to document size (ADR 0006 notes behavior with very large
+    // documents was not verified).
     var points = 0;
     for (final s in controller.document.strokes) {
       points += s.points.length;
     }
+    // Cache-side numbers: plain getters on TileCache, read in one go so they
+    // describe the same instant as the copies above.
     return _Reading(
       frame: copy,
       counters: snapshot,
@@ -392,6 +538,11 @@ class _Reading {
     );
   }
 
+  // `frame` and `counters` hold only the scalar fields copied in
+  // [_Reading.of]. `frame.draws` (the per-tile map) and `counters.buildMillis`
+  // are left empty here: per-state totals are in [draws] and the build-time
+  // samples are in [buildHistory]. The in-canvas overlay uses the live
+  // `TiledRenderer.frame.draws`, not this snapshot.
   final TileFrameStats frame;
   final TileCacheCounters counters;
   final double zoom;
@@ -413,11 +564,21 @@ class _Reading {
   final List<double> buildHistory;
   final Map<TileDraw, int> draws;
 
+  /// Number of visible tiles drawn in state [d] (0 when absent).
   int drawCount(TileDraw d) => draws[d] ?? 0;
 
+  /// Pixels per document unit at the frame's level (`TileGrid.scaleOf`), as
+  /// text for the "level of detail" row.
   String get scale => TileGrid.scaleOf(frame.level).toString();
 
-  /// Plain-text dump for bug reports.
+  /// Plain-text dump for bug reports, copied to the clipboard by
+  /// `_CanvasDebugPaneState._copyReport`.
+  ///
+  /// Built only from this snapshot's fields, so it prints exactly the numbers
+  /// the pane showed at the moment of the reading. Lines, in order: viewport,
+  /// frame (level, visible count, record time, active splats) followed by one
+  /// indented line per [TileDraw] state, cache, counters, splats, document.
+  /// The two history plots are not included. Labels mirror the pane's rows.
   String report() {
     final b = StringBuffer()
       ..writeln('painter tile cache report')

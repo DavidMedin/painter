@@ -1,9 +1,24 @@
+// What: unit tests of splat generation: PencilSplats.build turns a stroke's
+//   points into flat atlas buffers (SplatBatch) whose count, determinism,
+//   placement, pressure dependence, and opacity are checked numerically.
+// Why: ADR 0004 renders strokes as a cloud of gaussian splats derived from
+//   the vector points, not stored. The look (a line that reads as pencil
+//   from afar, specks up close) and the guarantees later systems rely on
+//   (same stroke -> same specks, extending a stroke never moves earlier
+//   specks) are properties of this pure-Dart generator, so they can be
+//   tested without a GPU or any rendering.
+// Covers: lib/canvas/pencil_splats.dart (PencilSplats.build, which runs
+//   SplatStream once; SplatBatch layout). Pixels are checked elsewhere, in
+//   tiled_renderer_test.dart.
+
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_controller.dart';
 import 'package:painter/canvas/pencil_splats.dart';
 
+/// A two-point horizontal stroke from (10, 20) to (10 + [length], 20) with a
+/// constant pressure [weight].
 List<CanvasPoint> _line(double length, double weight) => [
   CanvasPoint(position: const Offset(10, 20), weight: weight),
   CanvasPoint(position: Offset(10 + length, 20), weight: weight),
@@ -21,6 +36,8 @@ Offset _centre(SplatBatch batch, int i) {
   );
 }
 
+// The splat buffers are plain Float32List/Int32List in drawRawAtlas layout
+// (four floats and one packed ARGB per splat), so tests read them directly.
 void main() {
   test('a stroke becomes many splats, enough to read as a pencil line', () {
     final batch = PencilSplats.build(_line(100, 1));
@@ -60,9 +77,14 @@ void main() {
     expect(b.transforms, isNot(a.transforms));
   });
 
+  // PencilSplats.build is SplatStream run once, and TiledRenderer draws the
+  // in-progress stroke by extending a SplatStream (ADR 0005). Appending
+  // points must emit only new splats and leave the existing prefix of the
+  // buffers bit-identical; this test pins that prefix property.
   test('extending a stroke does not move specks already laid down', () {
-    // The active stroke is rebuilt on every pointer move; earlier specks must
-    // stay put or the line would shimmer while drawing.
+    // The active stroke grows by one point per pointer move and is extended
+    // through SplatStream; earlier specks must stay put or the line would
+    // shimmer while drawing.
     final shortStroke = _line(30, 1);
     final longStroke = [
       ...shortStroke,
@@ -80,6 +102,9 @@ void main() {
     expect(after.colors.sublist(0, before.colors.length), before.colors);
   });
 
+  // Each splat is placed on a disc of radius brushDiameter * weight / 2
+  // around a sample (SplatStream._emit), so every splat centre, recovered
+  // with _centre, must lie within the brush radius of the segment.
   test('specks stay within the brush radius of the stroke path', () {
     const weight = 0.75;
     final radius = CanvasController.brushDiameter * weight / 2;
@@ -92,6 +117,9 @@ void main() {
     }
   });
 
+  // Guards the "uniform disc sampling" in SplatStream._emit: a stroke whose
+  // specks all sat on the centre line would look like a hairline, not a
+  // brush-width pencil mark.
   test(
     'specks fill the brush width rather than clumping on the centre line',
     () {

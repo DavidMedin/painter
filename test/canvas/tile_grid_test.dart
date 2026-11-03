@@ -1,3 +1,14 @@
+// What: unit tests of TileGrid's pure geometry: choosing a level of detail
+//   from zoom, tile sizes per level, which tiles cover a region, a tile's
+//   coarser ancestor, and the document-space bounds of a rotated viewport.
+// Why: ADR 0005 puts all tile geometry in tile_grid.dart as pure Dart (no
+//   GPU, no async) because both the scheduler (TileCache) and the painter
+//   (TiledRenderer) depend on it. Off-by-one errors here (an edge tile
+//   double-counted or dropped, negative indices rounded toward zero, a
+//   rotated view cut short) would show as missing or wrongly scaled tiles.
+// Covers: lib/canvas/tile_grid.dart (TileKey, TileGrid.levelFor, tileSize,
+//   tilesIn, rectOf, ancestor, visibleDocumentRect).
+
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -6,6 +17,10 @@ import 'package:painter/canvas/tile_grid.dart';
 
 void main() {
   group('level of detail', () {
+    // Level L serves pixelsPerUnit in (2^(L-0.5), 2^(L+0.5)] (ADR 0005:
+    // LOD = ceil(log2(zoom * devicePixelRatio) - 0.5)), so a tile is never
+    // magnified by more than sqrt(2). Called once per frame by
+    // TiledRenderer.paint.
     test('picks the level whose resolution is closest, rounding up', () {
       expect(TileGrid.levelFor(1), 0);
       expect(TileGrid.levelFor(2), 1);
@@ -16,6 +31,8 @@ void main() {
       expect(TileGrid.levelFor(1.5), 1);
     });
 
+    // ADR 0005: levels run from -4 to 5, spanning zoom 0.1-16 at device
+    // pixel ratios up to about 4.
     test('clamps to the supported range', () {
       expect(TileGrid.levelFor(1e-9), TileGrid.minLevel);
       expect(TileGrid.levelFor(1e9), TileGrid.maxLevel);
@@ -29,6 +46,9 @@ void main() {
   });
 
   group('tilesIn', () {
+    // Tiles are anchored to document space, so indices can be negative
+    // (ADR 0005 Consequences: "negative indices are covered by tests").
+    // Rounding toward zero instead of flooring would mis-index x < 0.
     test('covers a region exactly, including negative coordinates', () {
       final keys = TileGrid.tilesIn(
         const Rect.fromLTRB(-10, -10, 600, 20),
@@ -44,6 +64,8 @@ void main() {
       });
     });
 
+    // Regions are half-open on the right/bottom: a view ending exactly on a
+    // tile edge must not request the next tile (tilesIn uses ceil() - 1).
     test(
       'a region ending exactly on an edge does not include the next tile',
       () {
@@ -75,6 +97,8 @@ void main() {
     });
   });
 
+  // TileGrid.ancestor is what TiledRenderer._drawFallback uses to find a
+  // coarser cached tile to draw scaled up while the right level builds.
   group('ancestor', () {
     test('is the coarser tile containing the finer one', () {
       const key = TileKey(5, -3, 2);
@@ -97,6 +121,9 @@ void main() {
     });
   });
 
+  // A rotated view needs a larger document-space box than the screen size
+  // (ADR 0005: up to about 270 tiles when zoomed out and rotated). All four
+  // screen corners are mapped to document space and bounded.
   test('visibleDocumentRect bounds a rotated viewport', () {
     const screen = Size(100, 50);
     const angle = math.pi / 4;
