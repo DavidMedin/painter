@@ -29,6 +29,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:painter/debug/imgui.dart';
 
 /// Finds the window's visible box (the DecoratedBox around the title 'win')
@@ -155,10 +156,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('body text'), findsNothing);
 
-    await tester.tap(find.byIcon(Icons.arrow_right));
+    await tester.tap(find.byIcon(Icons.expand_more));
     await tester.pump();
     expect(find.text('body text'), findsOneWidget);
-    expect(find.byIcon(Icons.arrow_drop_down), findsOneWidget);
+    expect(find.byIcon(Icons.expand_less), findsOneWidget);
   });
 
   // Regression (status.md bug 2): a double-tap recognizer on the whole title
@@ -180,7 +181,7 @@ void main() {
 
       // No pump(duration) between the tap and the check: a recognizer waiting for
       // a second tap would still be holding the first.
-      await tester.tap(find.byIcon(Icons.arrow_drop_down));
+      await tester.tap(find.byIcon(Icons.expand_less));
       await tester.pump();
       expect(find.text('body text'), findsNothing);
 
@@ -306,6 +307,29 @@ void main() {
     tester.semantics.decrease(find.semantics.byLabel('n'));
     expect(seen, [4, 2]);
     handle.dispose();
+  });
+  testWidgets('focused slider responds to arrow keys', (tester) async {
+    final seen = <int>[];
+    await tester.pumpWidget(
+      _host([
+        ImWindow(
+          title: 'win',
+          children: [
+            ImSliderInt(
+              label: 'n',
+              value: 5,
+              min: 0,
+              max: 10,
+              onChanged: seen.add,
+            ),
+          ],
+        ),
+      ]),
+    );
+    await tester.tapAt(tester.getCenter(find.byType(ImSliderInt)));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    expect(seen.last, 6);
   });
 
   testWidgets('disabled button ignores taps', (tester) async {

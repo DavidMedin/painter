@@ -18,6 +18,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../help/contextual_help.dart';
+import '../ui/painter_action_button.dart';
+import '../ui/touch_target_settings.dart';
+
 /// Whether an [InAppFilePicker] is choosing a file to open or a path to
 /// save to.
 enum FilePickerMode { open, save }
@@ -202,11 +206,13 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
           children: [
             Row(
               children: [
-                IconButton(
-                  tooltip: 'Up a directory',
-                  icon: const Icon(Icons.arrow_upward),
+                PainterActionButton(
+                  icon: Icons.arrow_upward,
+                  label: 'Up',
+                  topic: HelpTopics.pickerUp,
                   onPressed: _goUp,
                 ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _currentDirectoryPath,
@@ -223,40 +229,63 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
                       itemCount: _entries.length,
                       itemBuilder: (context, index) {
                         final entry = _entries[index];
-                        return ListTile(
-                          leading: Icon(
-                            entry.isDirectory
-                                ? Icons.folder
-                                : Icons.insert_drive_file,
+                        final topic = entry.isDirectory
+                            ? HelpTopics.pickerDirectory
+                            : isSave
+                            ? HelpTopics.pickerSaveFile
+                            : HelpTopics.pickerFile;
+                        return ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: TouchTargetSettings.height(context),
                           ),
-                          title: Text(entry.name),
-                          onTap: entry.isDirectory
-                              ? () => _openDirectory(entry.name)
-                              : isSave
-                              ? () => _nameController.text = entry.name
-                              : () => _chooseOpenFile(entry.name),
+                          child: HelpTarget(
+                            topic: topic,
+                            child: ListTile(
+                              leading: Icon(
+                                entry.isDirectory
+                                    ? Icons.folder
+                                    : Icons.insert_drive_file,
+                              ),
+                              title: Text(entry.name),
+                              onTap: entry.isDirectory
+                                  ? () => _openDirectory(entry.name)
+                                  : isSave
+                                  ? () => _nameController.text = entry.name
+                                  : () => _chooseOpenFile(entry.name),
+                            ),
+                          ),
                         );
                       },
                     ),
             ),
             if (isSave) ...[
               const Divider(height: 1),
-              TextField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'File name'),
-                onSubmitted: (_) => _confirmSave(),
+              HelpTarget(
+                topic: HelpTopics.pickerFileName,
+                child: TextField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(labelText: 'File name'),
+                  onSubmitted: (_) => _confirmSave(),
+                ),
               ),
             ],
           ],
         ),
       ),
       actions: [
-        TextButton(
+        PainterActionButton(
+          icon: Icons.cancel_outlined,
+          label: 'Cancel',
+          topic: HelpTopics.pickerCancel,
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
         ),
         if (isSave)
-          TextButton(onPressed: _confirmSave, child: const Text('Save')),
+          PainterActionButton(
+            icon: Icons.save,
+            label: 'Save',
+            topic: HelpTopics.pickerSave,
+            onPressed: _confirmSave,
+          ),
       ],
     );
   }

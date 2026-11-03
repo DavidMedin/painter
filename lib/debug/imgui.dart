@@ -53,6 +53,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../help/contextual_help.dart';
+import '../ui/painter_action_button.dart';
+import '../ui/touch_target_settings.dart';
+
 /// Colors, metrics, and the shared monospace [TextStyle] of the kit. Every
 /// widget in this file reads its look from here, so restyling the kit means
 /// editing only this class. [good], [warn], and [bad] are also used by callers
@@ -129,7 +133,8 @@ class ImWindow extends StatefulWidget {
 
   /// When non-null a close button is shown in the title bar and calls this.
   /// The window does not hide itself; the owner removes it from the tree
-  /// (see CanvasDebugPane.onClose, wired to the F3 toggle in lib/main.dart).
+  /// (see CanvasDebugPane.onClose, wired to the Diagnostics workspace and F3
+  /// shortcut in lib/main.dart).
   final VoidCallback? onClose;
 
   @override
@@ -148,12 +153,12 @@ class _ImWindowState extends State<ImWindow> {
   /// Keeps the whole title bar (and its close button) inside [bounds], even
   /// after the window or its container is resized. A window wider than its
   /// container is pinned to the left edge.
-  Offset _clamped(Offset offset, Size bounds) {
+  Offset _clamped(Offset offset, Size bounds, double titleBarHeight) {
     final maxX = bounds.width.isFinite
         ? math.max(0.0, bounds.width - widget.width)
         : double.infinity;
     final maxY = bounds.height.isFinite
-        ? math.max(0.0, bounds.height - (ImTheme.rowHeight + 2))
+        ? math.max(0.0, bounds.height - titleBarHeight)
         : double.infinity;
     return Offset(
       offset.dx.clamp(0.0, maxX).toDouble(),
@@ -172,10 +177,11 @@ class _ImWindowState extends State<ImWindow> {
       child: LayoutBuilder(
         builder: (context, box) {
           _bounds = box.biggest;
-          final position = _clamped(_offset, _bounds);
+          final titleBarHeight = TouchTargetSettings.height(context) + 2;
+          final position = _clamped(_offset, _bounds, titleBarHeight);
           final maxHeight =
               widget.maxHeight ??
-              math.max(80.0, _bounds.height - position.dy - ImTheme.rowHeight);
+              math.max(80.0, _bounds.height - position.dy - titleBarHeight);
           return Stack(
             children: [
               Positioned(
@@ -229,59 +235,57 @@ class _ImWindowState extends State<ImWindow> {
     );
   }
 
-  /// Title bar: drag handle, collapse arrow, title text, optional close.
+  /// Title bar: shared action buttons, a drag handle, and a double-tap title.
   ///
   /// Dragging uses the whole bar (onPanUpdate, clamped by [_clamped]). The
-  /// arrow and close button handle single taps through InkWell. The
-  /// double-tap recognizer is attached to the title text only: on the whole
-  /// bar it delayed single taps on the arrow and close button by about 300 ms
-  /// (ADR 0006, Consequences).
+  /// collapse and close actions use [PainterActionButton]; double-tap is
+  /// attached only to the title text so single taps on the actions are not
+  /// delayed by the gesture recognizer (ADR 0006, Consequences).
   Widget _titleBar() {
+    final targetHeight = TouchTargetSettings.height(context);
+    final titleBarHeight = targetHeight + 2;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onPanUpdate: (d) =>
-          setState(() => _offset = _clamped(_offset + d.delta, _bounds)),
+      onPanUpdate: (d) => setState(
+        () => _offset = _clamped(_offset + d.delta, _bounds, titleBarHeight),
+      ),
       child: Container(
-        height: ImTheme.rowHeight + 2,
+        height: titleBarHeight,
         color: _collapsed ? ImTheme.titleBg : ImTheme.titleActive,
         padding: const EdgeInsets.symmetric(horizontal: 4),
         child: Row(
           children: [
-            InkWell(
-              onTap: () => setState(() => _collapsed = !_collapsed),
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: Icon(
-                  _collapsed ? Icons.arrow_right : Icons.arrow_drop_down,
-                  size: 16,
-                  color: ImTheme.text,
-                  semanticLabel: _collapsed
-                      ? 'Expand window'
-                      : 'Collapse window',
-                ),
-              ),
+            PainterActionButton(
+              icon: _collapsed ? Icons.expand_more : Icons.expand_less,
+              label: _collapsed ? 'Expand' : 'Collapse',
+              topic: HelpTopics.windowCollapse,
+              background: ImTheme.titleBg,
+              foreground: ImTheme.text,
+              minimumHeight: targetHeight,
+              onPressed: () => setState(() => _collapsed = !_collapsed),
             ),
             Expanded(
-              // Double-tap lives here only: a recognizer on the whole bar would
-              // delay the arrow's and close button's single taps.
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onDoubleTap: () => setState(() => _collapsed = !_collapsed),
-                child: Text(widget.title, overflow: TextOverflow.ellipsis),
+              child: HelpTarget(
+                topic: HelpTopics.diagnostics,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onDoubleTap: () => setState(() => _collapsed = !_collapsed),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(widget.title, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
               ),
             ),
             if (widget.onClose != null)
-              InkWell(
-                onTap: widget.onClose,
-                child: const Padding(
-                  padding: EdgeInsets.all(2),
-                  child: Icon(
-                    Icons.close,
-                    size: 14,
-                    color: ImTheme.text,
-                    semanticLabel: 'Close window',
-                  ),
-                ),
+              PainterActionButton(
+                icon: Icons.close,
+                label: 'Close',
+                topic: HelpTopics.windowClose,
+                background: ImTheme.titleBg,
+                foreground: ImTheme.text,
+                minimumHeight: targetHeight,
+                onPressed: widget.onClose,
               ),
           ],
         ),
@@ -322,36 +326,42 @@ class _ImSectionState extends State<ImSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
+        HelpTarget(
+          topic: HelpTopics.debugSection,
+          child: Semantics(
+            button: true,
+            expanded: _open,
+            label: widget.title,
             onTap: () => setState(() => _open = !_open),
-            child: Semantics(
-              button: true,
-              expanded: _open,
-              label: widget.title,
-              excludeSemantics: true,
-              child: Container(
-                height: ImTheme.rowHeight,
-                margin: const EdgeInsets.only(top: 3),
-                color: _hover ? ImTheme.headerHover : ImTheme.header,
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Row(
-                  children: [
-                    Icon(
-                      _open ? Icons.arrow_drop_down : Icons.arrow_right,
-                      size: 16,
-                      color: ImTheme.text,
+            excludeSemantics: true,
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hover = true),
+              onExit: (_) => setState(() => _hover = false),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => setState(() => _open = !_open),
+                  child: Container(
+                    height: TouchTargetSettings.height(context),
+                    margin: const EdgeInsets.only(top: 3),
+                    color: _hover ? ImTheme.headerHover : ImTheme.header,
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _open ? Icons.arrow_drop_down : Icons.arrow_right,
+                          size: 16,
+                          color: ImTheme.text,
+                        ),
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -460,84 +470,45 @@ class _ImCheckboxState extends State<ImCheckbox> {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: widget.label,
-      checked: widget.value,
-      onTap: () => widget.onChanged(!widget.value),
-      excludeSemantics: true,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => widget.onChanged(!widget.value),
-          child: SizedBox(
-            height: ImTheme.rowHeight,
-            child: Row(
-              children: [
-                Container(
-                  width: 14,
-                  height: 14,
-                  margin: const EdgeInsets.only(right: 6),
-                  color: _hover ? ImTheme.frameHover : ImTheme.frameBg,
-                  child: widget.value
-                      ? const Icon(Icons.check, size: 12, color: ImTheme.accent)
-                      : null,
-                ),
-                Expanded(
-                  child: Text(widget.label, overflow: TextOverflow.ellipsis),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// `Button`. A null [onPressed] renders it disabled (dim, no hover, no tap).
-class ImButton extends StatefulWidget {
-  const ImButton({super.key, required this.label, required this.onPressed});
-
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  State<ImButton> createState() => _ImButtonState();
-}
-
-class _ImButtonState extends State<ImButton> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = widget.onPressed != null;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+    return HelpTarget(
+      topic: HelpTopics.debugCheckbox,
       child: Semantics(
-        button: true,
-        enabled: enabled,
         label: widget.label,
-        onTap: widget.onPressed,
+        checked: widget.value,
+        onTap: () => widget.onChanged(!widget.value),
         excludeSemantics: true,
         child: MouseRegion(
           onEnter: (_) => setState(() => _hover = true),
           onExit: (_) => setState(() => _hover = false),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.onPressed,
-            child: Container(
-              height: ImTheme.rowHeight,
-              alignment: Alignment.center,
-              color: !enabled
-                  ? ImTheme.frameBg
-                  : _hover
-                  ? ImTheme.headerHover
-                  : ImTheme.header,
-              child: Text(
-                widget.label,
-                style: enabled ? ImTheme.style : ImTheme.dim,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => widget.onChanged(!widget.value),
+              child: SizedBox(
+                height: TouchTargetSettings.height(context),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 22,
+                      height: 22,
+                      margin: const EdgeInsets.only(right: 8),
+                      color: _hover ? ImTheme.frameHover : ImTheme.frameBg,
+                      child: widget.value
+                          ? const Icon(
+                              Icons.check,
+                              size: 16,
+                              color: ImTheme.accent,
+                            )
+                          : null,
+                    ),
+                    Expanded(
+                      child: Text(
+                        widget.label,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -547,12 +518,39 @@ class _ImButtonState extends State<ImButton> {
   }
 }
 
-/// `SliderInt`: a labelled, draggable integer slider. Tapping or dragging on
-/// the track reports the value under the pointer through [onChanged]; it is
-/// not stored here, so the caller must feed the new value back in (the pane
-/// writes `TileCache.maxInFlight` / `maxTiles` and refreshes). Accessibility
-/// increase/decrease actions step by one. [value] is clamped to `[min, max]`
-/// for display. There is no keyboard handling in this widget.
+/// A labelled action with the shared help, focus, and touch-target behavior.
+class ImButton extends StatelessWidget {
+  const ImButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon = Icons.play_arrow,
+    this.topic = HelpTopics.debugAction,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final HelpTopic topic;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: PainterActionButton(
+      icon: icon,
+      label: label,
+      topic: topic,
+      background: ImTheme.header,
+      foreground: ImTheme.text,
+      onPressed: onPressed,
+    ),
+  );
+}
+
+/// A labelled, draggable integer slider. Tapping or dragging reports the
+/// value at the pointer through [onChanged]; [value] is clamped to [min] and
+/// [max] for display. Arrow keys and semantic increase/decrease actions step
+/// by one, and callers feed changes back through [value].
 class ImSliderInt extends StatefulWidget {
   const ImSliderInt({
     super.key,
@@ -575,6 +573,8 @@ class ImSliderInt extends StatefulWidget {
 
 class _ImSliderIntState extends State<ImSliderInt> {
   bool _hover = false;
+  bool _focused = false;
+  final FocusNode _focusNode = FocusNode(debugLabel: 'Diagnostic slider');
 
   /// Maps a pointer x offset within a track [width] pixels wide to a value in
   /// `[min, max]`: position as a fraction, clamped, then rounded to an int.
@@ -584,63 +584,107 @@ class _ImSliderIntState extends State<ImSliderInt> {
   }
 
   @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final value = widget.value.clamp(widget.min, widget.max);
     final span = math.max(1, widget.max - widget.min);
-    return Semantics(
-      label: widget.label,
-      value: '$value',
-      slider: true,
-      increasedValue: '${math.min(widget.max, value + 1)}',
-      decreasedValue: '${math.max(widget.min, value - 1)}',
-      onIncrease: value < widget.max ? () => widget.onChanged(value + 1) : null,
-      onDecrease: value > widget.min ? () => widget.onChanged(value - 1) : null,
-      excludeSemantics: true,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 1),
-        child: Row(
-          children: [
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, box) {
-                  return MouseRegion(
-                    onEnter: (_) => setState(() => _hover = true),
-                    onExit: (_) => setState(() => _hover = false),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTapDown: (d) => widget.onChanged(
-                        _at(d.localPosition.dx, box.maxWidth),
-                      ),
-                      onHorizontalDragUpdate: (d) => widget.onChanged(
-                        _at(d.localPosition.dx, box.maxWidth),
-                      ),
-                      child: Container(
-                        height: ImTheme.rowHeight - 2,
-                        color: _hover ? ImTheme.frameHover : ImTheme.frameBg,
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              left: 0,
-                              top: 0,
-                              bottom: 0,
-                              width: box.maxWidth * (value - widget.min) / span,
-                              child: const ColoredBox(color: ImTheme.header),
+    final targetHeight = TouchTargetSettings.height(context);
+    return HelpTarget(
+      topic: HelpTopics.debugSlider,
+      child: Focus(
+        focusNode: _focusNode,
+        onFocusChange: (focused) => setState(() => _focused = focused),
+        onKeyEvent: (node, event) {
+          if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+            return KeyEventResult.ignored;
+          }
+          final delta = switch (event.logicalKey) {
+            LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.arrowDown => -1,
+            LogicalKeyboardKey.arrowRight || LogicalKeyboardKey.arrowUp => 1,
+            _ => 0,
+          };
+          if (delta == 0) return KeyEventResult.ignored;
+          widget.onChanged((value + delta).clamp(widget.min, widget.max));
+          return KeyEventResult.handled;
+        },
+        child: Semantics(
+          label: widget.label,
+          value: '$value',
+          slider: true,
+          increasedValue: '${math.min(widget.max, value + 1)}',
+          decreasedValue: '${math.max(widget.min, value - 1)}',
+          onIncrease: value < widget.max
+              ? () => widget.onChanged(value + 1)
+              : null,
+          onDecrease: value > widget.min
+              ? () => widget.onChanged(value - 1)
+              : null,
+          excludeSemantics: true,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: SizedBox(
+              height: targetHeight,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, box) {
+                        return MouseRegion(
+                          onEnter: (_) => setState(() => _hover = true),
+                          onExit: (_) => setState(() => _hover = false),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapDown: (d) {
+                              _focusNode.requestFocus();
+                              widget.onChanged(
+                                _at(d.localPosition.dx, box.maxWidth),
+                              );
+                            },
+                            onHorizontalDragUpdate: (d) => widget.onChanged(
+                              _at(d.localPosition.dx, box.maxWidth),
                             ),
-                            Center(child: Text('$value')),
-                          ],
-                        ),
-                      ),
+                            child: Container(
+                              height: targetHeight,
+                              color: _hover || _focused
+                                  ? ImTheme.frameHover
+                                  : ImTheme.frameBg,
+                              child: Stack(
+                                children: [
+                                  Positioned(
+                                    left: 0,
+                                    top: 0,
+                                    bottom: 0,
+                                    width:
+                                        box.maxWidth *
+                                        (value - widget.min) /
+                                        span,
+                                    child: const ColoredBox(
+                                      color: ImTheme.header,
+                                    ),
+                                  ),
+                                  Center(child: Text('$value')),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: 110,
+                    child: Text(widget.label, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 6),
-            SizedBox(
-              width: 110,
-              child: Text(widget.label, overflow: TextOverflow.ellipsis),
-            ),
-          ],
+          ),
         ),
       ),
     );

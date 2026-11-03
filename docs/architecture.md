@@ -29,10 +29,26 @@
 
 ## Debug Pane (developer tool)
 
-- **Purpose:** show the tile cache's internals in the running app and expose a few controls. Hidden by default (the app still opens to the blank canvas); an AppBar bug icon or `F3` toggles it. See [ADR 0006](decisions/0006-debug-pane.md).
+- **Purpose:** show the tile cache's internals in the running app and expose a few controls. Hidden by default (the app still opens to the blank canvas); the workspace selector offers the diagnostics arrangement, and `F3` switches the same content. See [ADR 0006](decisions/0006-debug-pane.md).
 - **Layers:** `lib/debug/imgui.dart` is a reusable, painter-agnostic widget kit in the style of Dear ImGui (window, collapsible sections, rows, checkbox, button, integer slider, plot, stacked bar). `lib/debug/canvas_debug_pane.dart` composes it into the pane; `lib/debug/tile_overlay.dart` paints canvas overlays; `CanvasDebugOptions` carries the overlay switches.
 - **Boundary:** the core (`TileCache`, `TiledRenderer`, `lib/canvas/tile_stats.dart`) only records counters and per-frame tile classification and never imports debug UI. The pane reads one frozen snapshot per refresh and writes only `maxInFlight`, `maxTiles`, `invalidateAll()`, `resetViewport()`, and the overlay switches.
 - **Evidence:** unit tests drive a real `TiledRenderer` to check the per-frame classification and counters; widget tests cover the kit and the pane in the real `PainterApp` (toggle, live numbers, pause, controls, overlays, report, no interference with drawing).
+
+## Application controls and workspaces
+
+- **Controls:** `lib/ui/painter_action_button.dart` supplies the shared labeled
+  action style; `lib/help/contextual_help.dart` catalogs hover hints and F1
+  articles. F1 chooses hovered help, then keyboard-focused help, then general
+  help. These scopes wrap Navigator so modal routes inherit help and sizing.
+  The workspace selector presents only the existing canvas and diagnostics
+  arrangements.
+- **Touch sizing:** `TouchTargetSettings` in
+  `lib/ui/touch_target_settings.dart` provides app-wide 48-logical-pixel
+  standard and 56-logical-pixel enlarged minimum heights. The in-session
+  switch is in the AppBar.
+- **Evidence and record:** widget tests cover workspace selection, F1 opening
+  help for hovered canvas and modal-dialog controls, touch target sizing, and
+  help-topic precedence. See [ADR 0008](decisions/0008-discoverable-controls-workspaces-and-touch-targets.md).
 
 ## Code Documentation
 

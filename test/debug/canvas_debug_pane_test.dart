@@ -10,7 +10,7 @@
 // Covers: lib/debug/canvas_debug_pane.dart (CanvasDebugPane and its private
 //   snapshot, report text), lib/debug/canvas_debug_options.dart,
 //   lib/debug/tile_overlay.dart (tileDrawColor), and the wiring in
-//   lib/main.dart (AppBar button, F3, CanvasView.onRenderer/debugOptions).
+//   lib/main.dart (workspace selector, F3, CanvasView.onRenderer/debugOptions).
 //
 // Overview: how the pane is tested
 // --------------------------------
@@ -19,8 +19,8 @@
 // (maxInFlight, maxTiles), and refreshes on a 250 ms timer from one frozen
 // snapshot per refresh (ADR 0006, "Frozen snapshot"). Because it only has
 // meaning next to a live cache, these tests are widget-driven end to end:
-// PainterApp is pumped, the pane is opened with F3, strokes are drawn with
-// synthetic mouse events, and the assertions compare what the pane shows with
+// PainterApp is pumped, the pane is opened through the workspace selector or
+// F3, strokes are drawn with synthetic mouse events, and the assertions compare
 // the TileCache / CanvasController / CanvasDebugOptions objects it reads.
 // The tile builds run on real asynchronous work, so helpers wait in real time
 // (see _letTilesLand). Layout uses the Ahem test font.
@@ -123,11 +123,15 @@ void main() {
     expect(find.byType(CanvasView), findsOneWidget);
   });
 
-  testWidgets('the app bar button and F3 both toggle the pane', (tester) async {
+  testWidgets('workspace selector and F3 switch diagnostics content', (
+    tester,
+  ) async {
     await tester.pumpWidget(const PainterApp());
 
-    await tester.tap(find.byTooltip('Debug pane (F3)'));
-    await tester.pump();
+    await tester.tap(find.text('Canvas'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Diagnostics'));
+    await tester.pumpAndSettle();
     expect(_pane, findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
@@ -138,11 +142,27 @@ void main() {
     await tester.pump();
     expect(_pane, findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.close));
+    await tester.tap(find.byTooltip('Hide the diagnostics window'));
     await tester.pump();
     expect(_pane, findsNothing);
   });
 
+  testWidgets('touch setting enlarges diagnostics controls', (tester) async {
+    await tester.pumpWidget(const PainterApp());
+    await tester.tap(find.text('Canvas'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Diagnostics'));
+    await tester.pumpAndSettle();
+
+    final checkbox = find.byType(ImCheckbox).first;
+    await tester.ensureVisible(checkbox);
+    await tester.pump();
+    expect(tester.getSize(checkbox).height, 48);
+
+    await tester.tap(find.text('Touch: Standard'));
+    await tester.pump();
+    expect(tester.getSize(checkbox).height, 56);
+  });
   // ADR 0006 states canvas input outside the pane is unaffected and tests it
   // here; the second half checks the opposite: pressing the pane's own title
   // bar drags the window and must not add a stroke.

@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import '../debug/canvas_debug_options.dart';
 import '../debug/tile_overlay.dart';
 import 'canvas_controller.dart';
+import '../help/contextual_help.dart';
 import 'tile_grid.dart';
 import 'tiled_renderer.dart';
 
@@ -268,27 +269,30 @@ class _CanvasViewState extends State<CanvasView> {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: 'Canvas',
-      child: Listener(
-        key: _surfaceKey,
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: _onPointerDown,
-        onPointerMove: _onPointerMove,
-        onPointerUp: _finishPointer,
-        onPointerCancel: _finishPointer,
-        onPointerPanZoomStart: _onPanZoomStart,
-        onPointerPanZoomUpdate: _onPanZoomUpdate,
-        onPointerPanZoomEnd: _onPanZoomEnd,
-        onPointerSignal: _onPointerSignal,
-        child: CustomPaint(
-          painter: _CanvasPainter(
-            widget.controller,
-            _renderer,
-            MediaQuery.devicePixelRatioOf(context),
-            widget.debugOptions,
+    return HelpTarget(
+      topic: HelpTopics.canvas,
+      child: Semantics(
+        label: 'Canvas',
+        child: Listener(
+          key: _surfaceKey,
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: _onPointerDown,
+          onPointerMove: _onPointerMove,
+          onPointerUp: _finishPointer,
+          onPointerCancel: _finishPointer,
+          onPointerPanZoomStart: _onPanZoomStart,
+          onPointerPanZoomUpdate: _onPanZoomUpdate,
+          onPointerPanZoomEnd: _onPanZoomEnd,
+          onPointerSignal: _onPointerSignal,
+          child: CustomPaint(
+            painter: _CanvasPainter(
+              widget.controller,
+              _renderer,
+              MediaQuery.devicePixelRatioOf(context),
+              widget.debugOptions,
+            ),
+            size: Size.infinite,
           ),
-          size: Size.infinite,
         ),
       ),
     );

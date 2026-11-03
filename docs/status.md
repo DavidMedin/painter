@@ -2,7 +2,7 @@
 
 - **Current state:** a runnable macOS Flutter app with the first painting workflow and an in-house (non-native) Open/Save document flow implemented.
 - **In progress:** T-005, saved-document behavior. Headless automated verification is complete; a live visual confirmation of the Open/Save UI in the built Release app is outstanding.
-- **Last verified:** T-005 tests, analysis, and the macOS Release build passed. The Release app launches and stays running with no errors logged, but this agent's Accessibility permission was revoked mid-task, so the running window could not be reliably brought to a key/composited state for a trustworthy screenshot of the Open/Save UI; `screencapture` of the non-key window returned blank/black frames, not real content, while the process itself logged no exceptions. The later pencil splat stroke change (see its section below) also passes tests, analysis, and the Release build.
+- **Last verified:** T-005 tests, analysis, and its earlier macOS Release build passed. The discoverable-controls/workspaces enhancement below passes all 86 tests, `flutter analyze`, and a headless macOS Release build (42.5 MB). No GUI window was launched or visually inspected for that enhancement; Xcode emitted stale-artifact path warnings for a sibling build directory.
 - **Next action:** Have a user (or an agent with Accessibility/window-focus access restored) click through Open and Save once in the Release build to visually confirm the in-house picker dialog, then mark T-005 done.
 - **Blockers:** Live visual verification of T-005's user-visible path is blocked by this agent's Accessibility permission being revoked; see T-005 Verification below.
 
@@ -98,3 +98,11 @@
 ## Apple Virtualization VM Exploration (not pursued further)
 
 An earlier attempt used native file dialogs (`file_selector`) verified through a local Apple Virtualization macOS guest, so the native dialogs could be screenshotted outside the host's own file-dialog state. The guest built, signed, and had macOS installed successfully, but `VZVirtualMachine.start` never completed. Sampling both the VM host process and Apple's own `com.apple.Virtualization.VirtualMachine.xpc` helper mid-stall showed both completely idle (no hypervisor-execution threads), and the unified system log showed the host's Carbon Black Endpoint Security extension repeatedly erroring while intercepting Virtualization-framework file accesses for the entire stall window — a corporate EDR conflict with the VM host on this managed laptop, not a defect in the VM tooling. That exploration (VM scripts, ADR, and `file_selector`-based implementation) is preserved on the `vm-native-dialog-approach` bookmark rather than discarded, in case native-dialog verification is revisited later on unmanaged hardware or with an EDR exception. T-005 now uses the in-house picker described above instead, which needs no VM and is fully headlessly testable.
+
+## Discoverable Controls, Workspaces, and Touch Targets (out-of-roadmap UI/UX enhancement)
+
+- Direct UI/UX request: discoverable labeled controls, contextual F1 help, a workspace selector backed by implemented content, and configurable touch targets. Only the existing Canvas and Diagnostics workspaces are offered; F3 opens Diagnostics. See [ADR 0008](decisions/0008-discoverable-controls-workspaces-and-touch-targets.md).
+- `flutter test` — passed all 86 tests, including workspace selection, hovered-control and modal-dialog F1 help, touch sizing, help precedence, canvas painting workflow semantics, and off-screen diagnostics-window recovery.
+- `flutter analyze` — passed: `No issues found!`.
+- `flutter build macos --release` — passed; built `build/macos/Build/Products/Release/painter.app` (42.5 MB). Xcode warned about stale build artifacts under `/Users/medindj1/small-projects/painter/build/`, outside this worktree.
+- No app window was launched or visually verified for this enhancement, per [testing.md](testing.md).

@@ -37,7 +37,9 @@
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart' show BuildContext, SelectableText;
+import 'package:flutter/material.dart'
+    show AlertDialog, BuildContext, SelectableText;
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
 import 'package:painter/document/document_file_service.dart';
@@ -93,9 +95,7 @@ void main() {
           )
           .toList();
       final expectedWeights = controller.document.strokes
-          .map(
-            (stroke) => stroke.points.map((point) => point.weight).toList(),
-          )
+          .map((stroke) => stroke.points.map((point) => point.weight).toList())
           .toList();
       await _drawStroke(tester, canvasFinder, 3, const Offset(90, 30));
       controller.panBy(const Offset(40, 25));
@@ -149,15 +149,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('File operation failed'), findsOneWidget);
-    expect(
-      find.textContaining('Could not open the document'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Could not open the document'), findsOneWidget);
     expect(controller.document.strokes, hasLength(1));
     expect(
-      controller.document.strokes.single.points.map(
-        (point) => point.position,
-      ),
+      controller.document.strokes.single.points.map((point) => point.position),
       orderedEquals(originalPoints),
     );
 
@@ -167,6 +162,26 @@ void main() {
       tester.widget<SelectableText>(find.byType(SelectableText)).data,
       contains('FormatException'),
     );
+    final pointer = TestPointer(42, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(find.text('Details'))),
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.f1);
+    await tester.pumpAndSettle();
+    expect(find.text('Error details'), findsOneWidget);
+    expect(
+      find.textContaining('Expand the error details to inspect the operation'),
+      findsOneWidget,
+    );
+    final helpDialog = find.ancestor(
+      of: find.text('Error details'),
+      matching: find.byType(AlertDialog),
+    );
+    await tester.tap(
+      find.descendant(of: helpDialog, matching: find.text('Close')),
+    );
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
@@ -175,10 +190,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('File operation failed'), findsOneWidget);
-    expect(
-      find.textContaining('Could not save the document'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Could not save the document'), findsOneWidget);
     expect(controller.document.strokes, hasLength(1));
     await tester.tap(find.text('Details'));
     await tester.pumpAndSettle();

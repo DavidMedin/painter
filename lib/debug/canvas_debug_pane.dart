@@ -13,7 +13,7 @@
 // OVERVIEW: the debug pane
 // ---------------------------------------------------------------------------
 // What it is: a floating tool window, hidden by default and toggled by the
-//   AppBar bug icon or F3 (lib/main.dart), that shows how the tiled texture
+//   workspace selector or F3 (lib/main.dart), that shows how the tiled texture
 //   cache (ADR 0005) is behaving: which level of detail is drawn, how every
 //   visible tile was drawn (current, stale, coarser/finer fallback, missing,
 //   blank), cache occupancy, build queue, counters, splat memory, and viewport.
@@ -68,6 +68,7 @@ import '../canvas/pencil_splats.dart';
 import '../canvas/tile_grid.dart';
 import '../canvas/tile_stats.dart';
 import '../canvas/tiled_renderer.dart';
+import '../help/contextual_help.dart';
 import 'canvas_debug_options.dart';
 import 'imgui.dart';
 import 'tile_overlay.dart';
@@ -87,8 +88,8 @@ const int _tileBytes = TileGrid.texturePixels * TileGrid.texturePixels * 4;
 /// [CanvasDebugOptions.paused] is set (actions the user takes in the pane
 /// itself still refresh it; see `_refreshNow`).
 ///
-/// Constructed in lib/main.dart only when the F3 toggle is on and
-/// CanvasView has handed back its renderer through `onRenderer`; the system
+/// Constructed in lib/main.dart when the Diagnostics workspace is selected
+/// and CanvasView has handed back its renderer through `onRenderer`; the system
 /// overview is at the top of this file.
 class CanvasDebugPane extends StatefulWidget {
   const CanvasDebugPane({
@@ -233,7 +234,9 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                   '${r.frame.visibleRect.height.toStringAsFixed(0)}',
             ),
             ImButton(
+              icon: Icons.center_focus_strong,
               label: 'Reset view',
+              topic: HelpTopics.resetView,
               onPressed: () {
                 widget.controller.resetViewport();
                 _refreshNow();
@@ -399,13 +402,20 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
               onChanged: (v) => options.paused = v,
             ),
             ImButton(
+              icon: Icons.refresh,
               label: 'Discard all tiles (rebuild)',
+              topic: HelpTopics.rebuildTiles,
               onPressed: () {
                 cache.invalidateAll();
                 _refreshNow();
               },
             ),
-            ImButton(label: 'Copy report', onPressed: _copyReport),
+            ImButton(
+              icon: Icons.copy_all,
+              label: 'Copy report',
+              topic: HelpTopics.copyReport,
+              onPressed: _copyReport,
+            ),
             if (_notice != null) ImText(_notice!, color: ImTheme.good),
           ],
         ),

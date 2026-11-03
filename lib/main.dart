@@ -1,8 +1,8 @@
-// What: The application shell. `main` starts [PainterApp], which owns the one
+// What: The app shell. `main` starts [PainterApp], which owns the one
 // CanvasController (the open document and viewport), builds the MaterialApp
-// and AppBar with Open / Save / debug-pane buttons, wires the file-operation
-// flow (_openDocument / _saveDocument), shows file-operation errors
-// (_showFileOperationError), and toggles the tile-cache debug pane.
+// and AppBar with the workspace selector, Open / Save, and touch-size toggle,
+// wires file operations (_openDocument / _saveDocument), displays contextual
+// help, and hosts the tile-cache diagnostics pane.
 //
 // Why: Something has to own the state that crosses subsystems: the canvas
 // (canvas/), the file I/O abstraction (document/), and the debug pane
@@ -21,10 +21,9 @@
 // App shell overview
 //
 // What it is: the top-level widget tree and the small amount of mutable
-// state that is not part of the painting model itself: the path of the
-// associated document file, the "file operation in progress" flag, and
-// whether the debug pane is visible.
-//
+// state that is not part of the painting model itself: the associated document
+// path, file-operation state, workspace selection, diagnostics visibility,
+// contextual-help state, and touch-target size.
 // Why PainterApp owns the document path and the in-flight flag: the path is
 // not part of CanvasDocument (the saved format, docs/decisions/0002-saved-
 // document-format-and-flow.md, contains strokes only), and the controller
@@ -64,12 +63,12 @@
 // implemented here.
 //
 // Debug pane (docs/decisions/0006-debug-pane.md): hidden by default. The
-// AppBar bug button and the F3 key both call _toggleDebugPane. The pane needs
-// the TiledRenderer that CanvasView creates internally; CanvasView reports it
-// through its onRenderer callback (from its initState), which stores it in
-// _renderer, and the pane is only built once _renderer is non-null.
-// _debugOptions is created here and shared with CanvasView (which paints the
-// overlays) and with CanvasDebugPane (which edits the switches).
+// workspace selector and F3 both switch between the canvas and the existing
+// diagnostics pane. The pane needs the TiledRenderer that CanvasView creates
+// internally; CanvasView reports it through its onRenderer callback (from its
+// initState), which stores it in _renderer, and the pane is only built once
+// _renderer is non-null. _debugOptions is shared with CanvasView (which paints
+// the overlays) and CanvasDebugPane (which edits the switches).
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -83,6 +82,19 @@ import 'canvas/tiled_renderer.dart';
 import 'debug/canvas_debug_options.dart';
 import 'debug/canvas_debug_pane.dart';
 import 'document/document_file_service.dart';
+import 'help/contextual_help.dart';
+import 'ui/painter_action_button.dart';
+import 'ui/touch_target_settings.dart';
+
+/// Workspace arrangements backed by implemented app content.
+enum WorkspaceMode {
+  canvas('Canvas'),
+  canvasDiagnostics('Diagnostics');
+
+  const WorkspaceMode(this.label);
+
+  final String label;
+}
 
 void main() {
   runApp(const PainterApp());
@@ -105,22 +117,40 @@ class PainterApp extends StatefulWidget {
 
 class _PainterAppState extends State<PainterApp> {
   final CanvasController _controller = CanvasController();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final DocumentFileService _fileService =
       widget.fileService ?? InAppDocumentFileService();
   String? _documentPath;
   bool _fileOperationInProgress = false;
 
   final CanvasDebugOptions _debugOptions = CanvasDebugOptions();
+  final HelpState _helpState = HelpState();
   TiledRenderer? _renderer;
-  bool _showDebugPane = false;
+  WorkspaceMode _workspace = WorkspaceMode.canvas;
+  bool _enlargeTargets = false;
 
-  void _toggleDebugPane() => setState(() => _showDebugPane = !_showDebugPane);
+  bool get _showDebugPane => _workspace == WorkspaceMode.canvasDiagnostics;
+
+  void _toggleDebugPane() => _selectWorkspace(
+    _showDebugPane ? WorkspaceMode.canvas : WorkspaceMode.canvasDiagnostics,
+  );
+
+  void _selectWorkspace(WorkspaceMode mode) => setState(() {
+    _workspace = mode;
+  });
+
+  Future<void> _showContextHelp() async {
+    final context = _navigatorKey.currentState?.overlay?.context;
+    if (context == null) return;
+    await showContextHelp(context, _helpState.activeTopic);
+  }
 
   /// Releases the objects this State created itself. The [DocumentFileService]
   /// is not disposed: it holds no resources and may have been injected.
   @override
   void dispose() {
     _debugOptions.dispose();
+    _helpState.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -202,95 +232,155 @@ class _PainterAppState extends State<PainterApp> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Could not $operation the document: $error'),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('Details'),
-              children: [
-                SizedBox(
-                  height: 180,
-                  width: 400,
-                  child: SingleChildScrollView(
-                    child: SelectableText('$error\n\n$stackTrace'),
+            HelpTarget(
+              topic: HelpTopics.dialogDetails,
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                minTileHeight: TouchTargetSettings.height(context),
+                title: const Text('Details'),
+                children: [
+                  SizedBox(
+                    height: 180,
+                    width: 400,
+                    child: SingleChildScrollView(
+                      child: SelectableText('$error\n\n$stackTrace'),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(
+          PainterActionButton(
+            icon: Icons.close,
+            label: 'Close',
+            topic: HelpTopics.dialogClose,
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
           ),
         ],
       ),
     );
   }
 
-  /// Builds the app: AppBar (Open, Save, debug toggle) over a [Stack] of the
-  /// [CanvasView] and, when enabled, the [CanvasDebugPane] floating on top.
-  ///
-  /// The [Builder] gives the buttons a context that is below the
-  /// [MaterialApp]; passing this State's own context to [_openDocument] or
-  /// [_saveDocument] would have no Navigator ancestor for showDialog. The
-  /// [CallbackShortcuts] plus autofocused [Focus] route F3 to
-  /// [_toggleDebugPane]; the Focus node is what lets key events reach the
-  /// shortcut when nothing else is focused.
+  /// Builds the app shell and optional diagnostics workspace. The selector
+  /// changes only between implemented arrangements; F3 is equivalent to
+  /// selecting Diagnostics. Help, touch sizing, and shortcuts wrap Navigator
+  /// so modal routes inherit them; F1 uses the Navigator overlay context.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Painter',
+      navigatorKey: _navigatorKey,
+      builder: (context, child) => HelpScope(
+        helpState: _helpState,
+        child: TouchTargetSettings(
+          enlarged: _enlargeTargets,
+          child: CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.f1): _showContextHelp,
+              const SingleActivator(LogicalKeyboardKey.f3): _toggleDebugPane,
+            },
+            child: Focus(autofocus: true, child: child!),
+          ),
+        ),
+      ),
       home: Builder(
-        builder: (context) => CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.f3): _toggleDebugPane,
-          },
-          child: Focus(
-            autofocus: true,
-            child: Scaffold(
-              appBar: AppBar(
-                title: const Text('Painter'),
-                actions: [
-                  TextButton.icon(
-                    onPressed: _fileOperationInProgress
-                        ? null
-                        : () => _openDocument(context),
-                    icon: const Icon(Icons.folder_open),
-                    label: const Text('Open'),
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: HelpTarget(
+              topic: HelpTopics.workspace,
+              child: SizedBox(
+                height: TouchTargetSettings.height(context),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<WorkspaceMode>(
+                    value: _workspace,
+                    items: [
+                      for (final mode in WorkspaceMode.values)
+                        DropdownMenuItem(
+                          value: mode,
+                          child: SizedBox(
+                            height: TouchTargetSettings.height(context),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  mode == WorkspaceMode.canvas
+                                      ? Icons.brush_outlined
+                                      : Icons.analytics_outlined,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(mode.label),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                    selectedItemBuilder: (context) => [
+                      for (final mode in WorkspaceMode.values)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              mode == WorkspaceMode.canvas
+                                  ? Icons.brush_outlined
+                                  : Icons.analytics_outlined,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(mode.label),
+                          ],
+                        ),
+                    ],
+                    onChanged: (mode) {
+                      if (mode != null) _selectWorkspace(mode);
+                    },
                   ),
-                  TextButton.icon(
-                    onPressed: _fileOperationInProgress
-                        ? null
-                        : () => _saveDocument(context),
-                    icon: const Icon(Icons.save),
-                    label: const Text('Save'),
-                  ),
-                  IconButton(
-                    tooltip: 'Debug pane (F3)',
-                    isSelected: _showDebugPane,
-                    onPressed: _toggleDebugPane,
-                    icon: const Icon(Icons.bug_report_outlined),
-                    selectedIcon: const Icon(Icons.bug_report),
-                  ),
-                ],
-              ),
-              body: Stack(
-                children: [
-                  CanvasView(
-                    controller: _controller,
-                    debugOptions: _debugOptions,
-                    onRenderer: (renderer) => _renderer = renderer,
-                  ),
-                  if (_showDebugPane && _renderer != null)
-                    CanvasDebugPane(
-                      renderer: _renderer!,
-                      controller: _controller,
-                      options: _debugOptions,
-                      onClose: _toggleDebugPane,
-                    ),
-                ],
+                ),
               ),
             ),
+            actions: [
+              PainterActionButton(
+                icon: Icons.folder_open,
+                label: 'Open',
+                topic: HelpTopics.openDocument,
+                onPressed: _fileOperationInProgress
+                    ? null
+                    : () => _openDocument(context),
+              ),
+              PainterActionButton(
+                icon: Icons.save,
+                label: 'Save',
+                topic: HelpTopics.saveDocument,
+                onPressed: _fileOperationInProgress
+                    ? null
+                    : () => _saveDocument(context),
+              ),
+              PainterActionButton(
+                icon: Icons.touch_app,
+                label: _enlargeTargets ? 'Touch: Large' : 'Touch: Standard',
+                topic: HelpTopics.touchTargets,
+                onPressed: () =>
+                    setState(() => _enlargeTargets = !_enlargeTargets),
+              ),
+            ],
+          ),
+          body: Stack(
+            children: [
+              CanvasView(
+                controller: _controller,
+                debugOptions: _debugOptions,
+                onRenderer: (renderer) => _renderer = renderer,
+              ),
+              if (_showDebugPane && _renderer != null)
+                CanvasDebugPane(
+                  renderer: _renderer!,
+                  controller: _controller,
+                  options: _debugOptions,
+                  onClose: _toggleDebugPane,
+                ),
+            ],
           ),
         ),
       ),

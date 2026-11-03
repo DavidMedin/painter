@@ -1,14 +1,12 @@
-// What: Smoke test that PainterApp starts on the canvas screen.
-// Why: docs/project-brief.md says that launching without a file opens
-//   directly to a blank, paint-ready canvas with no splash screen;
-//   docs/status.md (T-003) lists this test as the launch check. It asserts
-//   only that a CanvasView and a semantics node labelled 'Canvas' are present
-//   right after the first frame; it does not assert that the canvas is empty
-//   (no strokes) or that no other route is shown.
-// Covers: lib/main.dart (PainterApp) and lib/canvas/canvas_view.dart
-//   (CanvasView, its 'Canvas' Semantics label).
+// What: Smoke tests for the initial canvas and F1 contextual help.
+// Why: The initial paint-ready canvas and keyboard-discoverable help are
+//   observable app-shell behavior; tests ensure both remain available.
+// Covers: lib/main.dart (PainterApp shortcuts and toolbar) and
+//   lib/canvas/canvas_view.dart (CanvasView, its 'Canvas' Semantics label).
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:painter/canvas/canvas_view.dart';
 import 'package:painter/main.dart';
 
@@ -20,8 +18,31 @@ void main() {
 
     await tester.pumpWidget(const PainterApp());
 
-    expect(find.bySemanticsLabel('Canvas'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(CanvasView),
+        matching: find.bySemanticsLabel('Canvas'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byType(CanvasView), findsOneWidget);
     semantics.dispose();
+  });
+  testWidgets('F1 opens help for the hovered control', (tester) async {
+    await tester.pumpWidget(const PainterApp());
+
+    final pointer = TestPointer(42, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(find.text('Open'))),
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.f1);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open document'), findsOneWidget);
+    expect(
+      find.textContaining('Browse to a .paint file and select it'),
+      findsOneWidget,
+    );
   });
 }

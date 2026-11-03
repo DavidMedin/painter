@@ -26,7 +26,13 @@ void main() {
   testWidgets('paint and navigate the macOS canvas', (tester) async {
     await tester.pumpWidget(const PainterApp());
 
-    expect(find.bySemanticsLabel('Canvas'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(CanvasView),
+        matching: find.bySemanticsLabel('Canvas'),
+      ),
+      findsOneWidget,
+    );
     final canvasFinder = find.byType(CanvasView);
     final controller = tester.widget<CanvasView>(canvasFinder).controller;
     final size = tester.getSize(canvasFinder);
