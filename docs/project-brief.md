@@ -41,6 +41,24 @@ Create painting software using Flutter and Dart.
 - A failed file operation shows the described popup and expandable details, is logged, and leaves the app running. A non-fatal internal error or exception is logged without terminating the app. A fatal error is logged with its stack trace and relevant information before termination.
 - Unit tests cover applicable isolated behavior. Integration tests cover interactions between modular components, including drawing a stroke and verifying the resulting canvas/document change. The finished macOS build must also demonstrate the user-visible scenarios; tests alone are insufficient.
 
+## UX
+User experience is of utmost importance. As it goes: "If it's not accessible, it's not acceptable". Of course, a task can be left inaccessible for development purposes, but it must be documented how and why.
+
+Here are some expected specifics:
+Buttons are to have some icon associated with the action on the left side of the text on the button. All buttons have text.
+All interactive elements have a hover-hint describing, in a very concise way, what it does _without_ regurgitating what the button's text is.
+Buttons should be clear that they are buttons: so they should have some depth that changes on-down.
+
+Panes should have some border if they logically should be separate than another pane.
+
+The panes, tools, widgets, windows, etc. all of it should be modular. What I mean by 'modular' here is something taken from Blender: every window is the same, but you can choose what the contents of the window is. It could be canvas mode, tools mode, brush settings mode, etc. The window select can be in the top left.
+
+A large part of accessability is discoverability. If a manual is needed then it should be accessible from within the software, and it should be easy to go from _any interactive element_ to its corresponding manual entry. One can jump to help for the element the user's cursor is hovering over by pressing F1.
+
+## UI
+The UI should be compact but useful. Accessible and configurable to fit with the most sausage of fingers (in the context of a touch screen). Visually, Blender's GUI is a good reference.
+
+
 ## Open Product and Technical Questions
 
 - What is the default brush size, and what exact pressure-to-size mapping should the stylus use?
