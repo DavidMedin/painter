@@ -10,6 +10,8 @@ macOS is the current target. Linux, Windows, and Android are future targets; the
 
 - [Agent instructions](AGENTS.md)
 - [Project brief](docs/project-brief.md)
+- [Feature strategy report](docs/feature-strategy-report.typ)
+- [Brush node-graph routes report](docs/brush-node-graph-routes.typ)
 - [Architecture](docs/architecture.md)
 - [Current status](docs/status.md)
 - [Testing](docs/testing.md)

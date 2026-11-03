@@ -106,3 +106,9 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 - `flutter analyze` — passed: `No issues found!`.
 - `flutter build macos --release` — passed; built `build/macos/Build/Products/Release/painter.app` (42.5 MB). Xcode logged that the `Any Mac` placeholder device has no OS version; the build succeeded.
 - No app window was launched or visually verified for this enhancement, per [testing.md](testing.md).
+
+## Brush Node-Graph Routes Research (out-of-roadmap, advisory)
+
+- Direct research request: compare candidate brush-graph architectures, typed sockets and node granularity, established brush-engine controls, pigment/wet media, smudge and clone behavior, and experimental alternatives. The [Typst report](brush-node-graph-routes.typ) is advice, not an ADR or a change to Painter's implementation; T-005 remains in progress.
+- `typst compile docs/brush-node-graph-routes.typ docs/brush-node-graph-routes.pdf` — passed; the complete report is a 14-page A4 PDF. `pdfinfo -url` lists the report's source and project-document link annotations. `pdftoppm -f 1 -l 14 -scale-to 700 -png` rendered every page; `pdftotext -layout` confirmed readable text flow including the full catalog and worked examples. Bounding-box extraction showed text within the page width on all pages (x = 51–544 pt, page width 595 pt). The image-question tool was unavailable, so manual visual inspection of the PNGs was not completed; clipping or aesthetics beyond text bounds were not visually certified.
+- No app behavior, Dart source, document format, or roadmap task state changed; Flutter tests and macOS GUI checks do not exercise this documentation-only report.
