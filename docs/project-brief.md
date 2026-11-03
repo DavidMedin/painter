@@ -24,7 +24,32 @@ Create painting software using Flutter and Dart.
 - The MVP supports opening and saving files; it does not support export.
 - The user can open or save through a UI element.
 - A launch without a file creates a blank, unsaved canvas. Opening a file replaces the current canvas/document.
-- Saving persists the current document. The exact behavior for saving a document that has no associated file is not yet specified.
+	- Saving persists the current document. The exact behavior for saving a document that has no associated file is not yet specified.
+
+## Killer Features
+These are features that make this software shine compared to other painting software. These must be done carefully and with specific intent, as they are complex systems indeed.
+
+### Node Graph Brushes
+All brushes are defined by a node graph. This ranges from the hard digital brush to the oil paint to the pencil. All brushes.
+
+A performance consideration for this item is that a graph might need to be compiled before running. evaluating a brush's node graph thousands of times
+per second may not be doable with a simple node graph evaluator. Technology used is TBD. Go with naive route for now.
+
+TBD if tools like magic wand or lasso select also are node based, but probably not. for now. So just brushes for now.
+
+### Node Graph Composition
+There are no 'layers' in the Photoshop or Krita sense. It'll behave more like Touch Designer and Blender. You draw within a canvas node, layer them on top, some with different
+modifiers, and connect it to the render/output node.
+Clicking a node focuses it, displaying its output in some render preview window, while the last canvas node selected is visible in the Canvas window for editing.
+
+### Everything is a vector
+Brushes do not go straight to pixels (for now). They create mathematical objects, like gaussian splats or tiny textures, then later, _lazily_ rendered via the Canvas Cache system.
+This allows for arbitrary resolution and editing of past strokes and the ability to undo everything.
+
+### Undo Undo Undo
+Append-only database\*. All strokes, including eraser strokes, are written overtop existing strokes, possibly occluding other strokes. This supports that everything is a vector.
+
+\* There may be cases where it isn't Append-only, like clearing very old data that we know is not relevant anymore.
 
 ## Errors
 
