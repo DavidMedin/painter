@@ -8,7 +8,7 @@ Accepted
 
 T-005 requires opening and saving vector canvas documents. The MVP explicitly excludes image export. The initial brief leaves the file format and first-save behavior unspecified.
 
-An earlier attempt used the platform's native file dialogs (`file_selector`) and verified them in a local Apple Virtualization macOS guest, so the native UI could be screenshotted outside the host's own file-dialog state. The guest could be built, signed, and have macOS installed, but `VZVirtualMachine.start` never completed: sampling both the VM host process and Apple's own `com.apple.Virtualization.VirtualMachine.xpc` helper mid-stall showed both completely idle, and the unified system log showed the host's Carbon Black Endpoint Security extension repeatedly erroring while intercepting file accesses the Virtualization framework made during startup, for the entire stall. That is a corporate EDR/managed-hardware conflict with the VM host, not a defect in the VM or dialog code, but it blocks automated verification on this machine.
+Native dialogs were initially tested in an Apple Virtualization macOS guest. macOS installed, but `VZVirtualMachine.start` stalled while Carbon Black repeatedly logged file-access interception errors; both VM processes were idle. This points to EDR interference on managed hardware, not a dialog defect, and prevents automated native-dialog checks here.
 
 ## Decision
 
