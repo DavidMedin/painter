@@ -1,9 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'canvas/canvas_controller.dart';
 import 'canvas/canvas_view.dart';
+import 'canvas/tiled_renderer.dart';
+import 'debug/canvas_debug_options.dart';
+import 'debug/canvas_debug_pane.dart';
 import 'document/document_file_service.dart';
 
 void main() {
@@ -27,8 +31,15 @@ class _PainterAppState extends State<PainterApp> {
   String? _documentPath;
   bool _fileOperationInProgress = false;
 
+  final CanvasDebugOptions _debugOptions = CanvasDebugOptions();
+  TiledRenderer? _renderer;
+  bool _showDebugPane = false;
+
+  void _toggleDebugPane() => setState(() => _showDebugPane = !_showDebugPane);
+
   @override
   void dispose() {
+    _debugOptions.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -117,27 +128,57 @@ class _PainterAppState extends State<PainterApp> {
     return MaterialApp(
       title: 'Painter',
       home: Builder(
-        builder: (context) => Scaffold(
-          appBar: AppBar(
-            title: const Text('Painter'),
-            actions: [
-              TextButton.icon(
-                onPressed: _fileOperationInProgress
-                    ? null
-                    : () => _openDocument(context),
-                icon: const Icon(Icons.folder_open),
-                label: const Text('Open'),
+        builder: (context) => CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.f3): _toggleDebugPane,
+          },
+          child: Focus(
+            autofocus: true,
+            child: Scaffold(
+              appBar: AppBar(
+                title: const Text('Painter'),
+                actions: [
+                  TextButton.icon(
+                    onPressed: _fileOperationInProgress
+                        ? null
+                        : () => _openDocument(context),
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('Open'),
+                  ),
+                  TextButton.icon(
+                    onPressed: _fileOperationInProgress
+                        ? null
+                        : () => _saveDocument(context),
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save'),
+                  ),
+                  IconButton(
+                    tooltip: 'Debug pane (F3)',
+                    isSelected: _showDebugPane,
+                    onPressed: _toggleDebugPane,
+                    icon: const Icon(Icons.bug_report_outlined),
+                    selectedIcon: const Icon(Icons.bug_report),
+                  ),
+                ],
               ),
-              TextButton.icon(
-                onPressed: _fileOperationInProgress
-                    ? null
-                    : () => _saveDocument(context),
-                icon: const Icon(Icons.save),
-                label: const Text('Save'),
+              body: Stack(
+                children: [
+                  CanvasView(
+                    controller: _controller,
+                    debugOptions: _debugOptions,
+                    onRenderer: (renderer) => _renderer = renderer,
+                  ),
+                  if (_showDebugPane && _renderer != null)
+                    CanvasDebugPane(
+                      renderer: _renderer!,
+                      controller: _controller,
+                      options: _debugOptions,
+                      onClose: _toggleDebugPane,
+                    ),
+                ],
               ),
-            ],
+            ),
           ),
-          body: CanvasView(controller: _controller),
         ),
       ),
     );

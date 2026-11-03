@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes the solid round-stroke rendering in [ADR 0001](0001-vector-canvas-and-flutter-input.md); the rest of ADR 0001 (vector document, pointer input, viewport controls) still applies.
+Accepted. Supersedes the solid round-stroke rendering in [ADR 0001](0001-vector-canvas-and-flutter-input.md); the rest of ADR 0001 (vector document, pointer input, viewport controls) still applies. Amended by [ADR 0005](0005-tiled-texture-cache.md): strokes are no longer replayed every frame, `PencilRenderer` and its per-stroke batch cache are replaced by a tile cache, and seeds are the stroke's document index rather than paint-order.
 
 ## Context
 

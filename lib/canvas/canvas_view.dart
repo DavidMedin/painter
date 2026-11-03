@@ -3,13 +3,28 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../debug/canvas_debug_options.dart';
+import '../debug/tile_overlay.dart';
 import 'canvas_controller.dart';
-import 'pencil_renderer.dart';
+import 'tile_grid.dart';
+import 'tiled_renderer.dart';
 
 class CanvasView extends StatefulWidget {
-  const CanvasView({super.key, required this.controller});
+  const CanvasView({
+    super.key,
+    required this.controller,
+    this.debugOptions,
+    this.onRenderer,
+  });
 
   final CanvasController controller;
+
+  /// When set, the canvas draws the overlays these options enable.
+  final CanvasDebugOptions? debugOptions;
+
+  /// Called once with the renderer this view owns, so tools can read its tile
+  /// cache and frame statistics. The renderer is disposed with the view.
+  final ValueChanged<TiledRenderer>? onRenderer;
 
   @override
   State<CanvasView> createState() => _CanvasViewState();
@@ -21,7 +36,13 @@ class _CanvasViewState extends State<CanvasView> {
   final Map<int, _PointerInteraction> _interactions = {};
   _TrackpadGesture? _trackpadGesture;
   final GlobalKey _surfaceKey = GlobalKey();
-  final PencilRenderer _renderer = PencilRenderer();
+  late final TiledRenderer _renderer = TiledRenderer();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.onRenderer?.call(_renderer);
+  }
 
   Size get _viewportSize {
     final renderObject = _surfaceKey.currentContext?.findRenderObject();
@@ -163,7 +184,12 @@ class _CanvasViewState extends State<CanvasView> {
         onPointerPanZoomEnd: _onPanZoomEnd,
         onPointerSignal: _onPointerSignal,
         child: CustomPaint(
-          painter: _CanvasPainter(widget.controller, _renderer),
+          painter: _CanvasPainter(
+            widget.controller,
+            _renderer,
+            MediaQuery.devicePixelRatioOf(context),
+            widget.debugOptions,
+          ),
           size: Size.infinite,
         ),
       ),
@@ -187,10 +213,19 @@ class _TrackpadGesture {
 }
 
 class _CanvasPainter extends CustomPainter {
-  _CanvasPainter(this.controller, this.renderer) : super(repaint: controller);
+  _CanvasPainter(
+    this.controller,
+    this.renderer,
+    this.devicePixelRatio,
+    this.debugOptions,
+  ) : super(
+        repaint: Listenable.merge([controller, renderer.cache, ?debugOptions]),
+      );
 
   final CanvasController controller;
-  final PencilRenderer renderer;
+  final TiledRenderer renderer;
+  final double devicePixelRatio;
+  final CanvasDebugOptions? debugOptions;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -204,13 +239,30 @@ class _CanvasPainter extends CustomPainter {
     canvas.translate(-center.dx, -center.dy);
     renderer.paint(
       canvas,
-      controller.document.strokes,
-      controller.activePoints.toList(growable: false),
+      document: controller.document,
+      active: controller.activePoints,
+      visible: TileGrid.visibleDocumentRect(
+        size,
+        (screen) => controller.toDocument(screen, size),
+      ),
+      pixelsPerUnit: controller.zoom * devicePixelRatio,
     );
+    final options = debugOptions;
+    if (options != null) {
+      paintTileOverlay(
+        canvas,
+        frame: renderer.frame,
+        options: options,
+        zoom: controller.zoom,
+      );
+    }
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(_CanvasPainter oldDelegate) =>
-      oldDelegate.controller != controller || oldDelegate.renderer != renderer;
+      oldDelegate.controller != controller ||
+      oldDelegate.renderer != renderer ||
+      oldDelegate.devicePixelRatio != devicePixelRatio ||
+      oldDelegate.debugOptions != debugOptions;
 }
