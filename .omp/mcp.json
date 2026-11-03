@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "quint-studio": {
+      "args": [
+        "mcp"
+      ],
+      "command": "/Applications/Quint Studio.app/Contents/MacOS/quint-studio"
+    }
+  }
+}
