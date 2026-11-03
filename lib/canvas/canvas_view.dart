@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'canvas_controller.dart';
+import 'pencil_renderer.dart';
 
 class CanvasView extends StatefulWidget {
   const CanvasView({super.key, required this.controller});
@@ -20,6 +21,7 @@ class _CanvasViewState extends State<CanvasView> {
   final Map<int, _PointerInteraction> _interactions = {};
   _TrackpadGesture? _trackpadGesture;
   final GlobalKey _surfaceKey = GlobalKey();
+  final PencilRenderer _renderer = PencilRenderer();
 
   Size get _viewportSize {
     final renderObject = _surfaceKey.currentContext?.findRenderObject();
@@ -140,6 +142,12 @@ class _CanvasViewState extends State<CanvasView> {
   }
 
   @override
+  void dispose() {
+    _renderer.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Semantics(
       label: 'Canvas',
@@ -155,7 +163,7 @@ class _CanvasViewState extends State<CanvasView> {
         onPointerPanZoomEnd: _onPanZoomEnd,
         onPointerSignal: _onPointerSignal,
         child: CustomPaint(
-          painter: _CanvasPainter(widget.controller),
+          painter: _CanvasPainter(widget.controller, _renderer),
           size: Size.infinite,
         ),
       ),
@@ -179,11 +187,10 @@ class _TrackpadGesture {
 }
 
 class _CanvasPainter extends CustomPainter {
-  _CanvasPainter(CanvasController controller)
-    : controller = controller,
-      super(repaint: controller);
+  _CanvasPainter(this.controller, this.renderer) : super(repaint: controller);
 
   final CanvasController controller;
+  final PencilRenderer renderer;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -195,44 +202,15 @@ class _CanvasPainter extends CustomPainter {
     canvas.rotate(controller.rotation);
     canvas.scale(controller.zoom);
     canvas.translate(-center.dx, -center.dy);
-
-    final linePaint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    final pointPaint = Paint()..color = Colors.black;
-    for (final stroke in controller.document.strokes) {
-      _paintPoints(canvas, stroke.points, linePaint, pointPaint);
-    }
-    _paintPoints(canvas, controller.activePoints, linePaint, pointPaint);
+    renderer.paint(
+      canvas,
+      controller.document.strokes,
+      controller.activePoints.toList(growable: false),
+    );
     canvas.restore();
-  }
-
-  void _paintPoints(
-    Canvas canvas,
-    Iterable<CanvasPoint> points,
-    Paint linePaint,
-    Paint pointPaint,
-  ) {
-    CanvasPoint? previous;
-    for (final point in points) {
-      if (previous != null) {
-        linePaint.strokeWidth =
-            CanvasController.brushDiameter *
-            (previous.weight + point.weight) /
-            2;
-        canvas.drawLine(previous.position, point.position, linePaint);
-      }
-      canvas.drawCircle(
-        point.position,
-        CanvasController.brushDiameter * point.weight / 2,
-        pointPaint,
-      );
-      previous = point;
-    }
   }
 
   @override
   bool shouldRepaint(_CanvasPainter oldDelegate) =>
-      oldDelegate.controller != controller;
+      oldDelegate.controller != controller || oldDelegate.renderer != renderer;
 }

@@ -2,7 +2,7 @@
 
 - **Current state:** a runnable macOS Flutter app with the first painting workflow and an in-house (non-native) Open/Save document flow implemented.
 - **In progress:** T-005, saved-document behavior. Headless automated verification is complete; a live visual confirmation of the Open/Save UI in the built Release app is outstanding.
-- **Last verified:** T-005 tests, analysis, and the macOS Release build passed. The Release app launches and stays running with no errors logged, but this agent's Accessibility permission was revoked mid-task, so the running window could not be reliably brought to a key/composited state for a trustworthy screenshot of the Open/Save UI; `screencapture` of the non-key window returned blank/black frames, not real content, while the process itself logged no exceptions.
+- **Last verified:** T-005 tests, analysis, and the macOS Release build passed. The Release app launches and stays running with no errors logged, but this agent's Accessibility permission was revoked mid-task, so the running window could not be reliably brought to a key/composited state for a trustworthy screenshot of the Open/Save UI; `screencapture` of the non-key window returned blank/black frames, not real content, while the process itself logged no exceptions. The later pencil splat stroke change (see its section below) also passes tests, analysis, and the Release build.
 - **Next action:** Have a user (or an agent with Accessibility/window-focus access restored) click through Open and Save once in the Release build to visually confirm the in-house picker dialog, then mark T-005 done.
 - **Blockers:** Live visual verification of T-005's user-visible path is blocked by this agent's Accessibility permission being revoked; see T-005 Verification below.
 
@@ -52,6 +52,15 @@
 - A throwaway widget test drove `TestPointer.panZoomStart/panZoomUpdate/panZoomEnd` (synthetic `PointerDeviceKind.trackpad` events) through `CanvasView` with incremental pan, then pinch (`scale: 1.5`), then rotate (`rotation: 0.3`); asserted and printed `CanvasController.pan`, `.zoom`, and `.rotation` all changed as expected (`pan=Offset(50.7, 39.2) zoom=1.5 rotation=0.3`), then was deleted.
 - `flutter build macos` — passed; built `build/macos/Build/Products/Release/painter.app` (42.0 MB).
 - Not verified: physical trackpad hardware behavior and whether the OS-reported rotation sign feels natural to an artist; only Flutter-side synthetic pan/zoom/rotate events were exercised.
+
+## Pencil Splat Stroke Verification (canvas, out-of-roadmap enhancement)
+
+- Direct user request, developed on branch `pencil-splat-stroke` in a separate git worktree (`../painter-pencil-splat`): replace the solid round stroke with many instanced gaussian splats so a stroke reads as a pencil line from a distance and each splat is a speck. See [ADR 0004](decisions/0004-pencil-splat-stroke-rendering.md). The saved-document format is unchanged.
+- `flutter analyze` — passed: `No issues found!`.
+- `flutter test` — passed all 25 tests: the 12 pre-existing tests unchanged, plus new `pencil_splats_test.dart` (generation invariants) and `pencil_renderer_test.dart` (offscreen pixel statistics). One full-suite run reported `file_picker_dialog_test.dart` as failing to load while the new test files still had analyzer errors; that file passed alone and in the next full run after the errors were fixed, and the cause was not isolated further.
+- Throwaway tests (deleted) rasterized strokes offscreen to PNG and were inspected: a roughly 634-unit full-weight wavy stroke produced 8,178 splats and showed a grainy graphite look; a pressure ramp narrowed and thinned toward low weight; at 10× zoom each splat was a soft gaussian blob with no square sprite edges.
+- `flutter build macos` — passed; built `build/macos/Build/Products/Release/painter.app` (42.0 MB).
+- Not verified: the stroke in the running macOS window. No app window was opened because [testing.md](testing.md) requires explicit permission for windowed runs; verification used offscreen rasterization only. Also not verified: drawing performance with the active stroke regenerated per pointer move on long strokes, physical stylus behavior, and whether the density, grain, and splat size suit an artist's idea of pencil.
 
 ## Apple Virtualization VM Exploration (not pursued further)
 

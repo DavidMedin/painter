@@ -13,7 +13,7 @@ Create painting software using Flutter and Dart.
 
 ## First Painting Workflow (T-004)
 
-- The canvas supports mouse and stylus drawing with a simple round digital brush.
+- The canvas supports mouse and stylus drawing with a pencil-like brush: each stroke is rendered as many small gaussian splats (specks) that read as a pencil line from a distance. See [ADR 0004](decisions/0004-pencil-splat-stroke-rendering.md).
 - Mouse drawing uses a fixed weight of `1.0`.
 - Stylus drawing uses a weight relative to stylus pressure.
 - Weight controls brush size only. There are no other brush settings in the MVP.
@@ -35,7 +35,7 @@ Create painting software using Flutter and Dart.
 ## Acceptance and Verification Scenarios
 
 - Launching without a file shows a blank, paint-ready canvas directly, with no splash screen.
-- A mouse stroke changes the canvas with a round brush using weight `1.0`; a stylus stroke changes it with a round brush whose size responds to pressure. Pressure changes size only.
+- A mouse stroke changes the canvas with a pencil-speck brush using weight `1.0`; a stylus stroke changes it with a pencil-speck brush whose size responds to pressure. Pressure changes size only.
 - Mouse input can pan, zoom, and rotate the canvas.
 - Opening a file replaces the current canvas/document with the opened content. Saving and reopening a document preserves its content.
 - A failed file operation shows the described popup and expandable details, is logged, and leaves the app running. A non-fatal internal error or exception is logged without terminating the app. A fatal error is logged with its stack trace and relevant information before termination.

@@ -19,3 +19,4 @@ At the start of every session, read these files in order:
 - Distinguish verified facts from assumptions. Do not invent product requirements or claim unsupported platform support.
 - macOS is the current target. Linux, Windows, and Android are future targets; their rollout order is undecided.
 - Do not prescribe code architecture or coding conventions before the project has code.
+- Follow `docs/version-control.md`: do feature work in a git worktree, and when it is complete commit it with `git` on its feature branch, stacked on the owner's current work, so it is visible in the owner's JJ repo. Uncommitted worktree changes are invisible to the owner.
