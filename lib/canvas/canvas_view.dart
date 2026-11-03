@@ -4,7 +4,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'canvas_controller.dart';
-import 'pencil_renderer.dart';
+import 'tile_grid.dart';
+import 'tiled_renderer.dart';
 
 class CanvasView extends StatefulWidget {
   const CanvasView({super.key, required this.controller});
@@ -21,7 +22,7 @@ class _CanvasViewState extends State<CanvasView> {
   final Map<int, _PointerInteraction> _interactions = {};
   _TrackpadGesture? _trackpadGesture;
   final GlobalKey _surfaceKey = GlobalKey();
-  final PencilRenderer _renderer = PencilRenderer();
+  final TiledRenderer _renderer = TiledRenderer();
 
   Size get _viewportSize {
     final renderObject = _surfaceKey.currentContext?.findRenderObject();
@@ -163,7 +164,11 @@ class _CanvasViewState extends State<CanvasView> {
         onPointerPanZoomEnd: _onPanZoomEnd,
         onPointerSignal: _onPointerSignal,
         child: CustomPaint(
-          painter: _CanvasPainter(widget.controller, _renderer),
+          painter: _CanvasPainter(
+            widget.controller,
+            _renderer,
+            MediaQuery.devicePixelRatioOf(context),
+          ),
           size: Size.infinite,
         ),
       ),
@@ -187,10 +192,12 @@ class _TrackpadGesture {
 }
 
 class _CanvasPainter extends CustomPainter {
-  _CanvasPainter(this.controller, this.renderer) : super(repaint: controller);
+  _CanvasPainter(this.controller, this.renderer, this.devicePixelRatio)
+    : super(repaint: Listenable.merge([controller, renderer.cache]));
 
   final CanvasController controller;
-  final PencilRenderer renderer;
+  final TiledRenderer renderer;
+  final double devicePixelRatio;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -204,13 +211,20 @@ class _CanvasPainter extends CustomPainter {
     canvas.translate(-center.dx, -center.dy);
     renderer.paint(
       canvas,
-      controller.document.strokes,
-      controller.activePoints.toList(growable: false),
+      document: controller.document,
+      active: controller.activePoints,
+      visible: TileGrid.visibleDocumentRect(
+        size,
+        (screen) => controller.toDocument(screen, size),
+      ),
+      pixelsPerUnit: controller.zoom * devicePixelRatio,
     );
     canvas.restore();
   }
 
   @override
   bool shouldRepaint(_CanvasPainter oldDelegate) =>
-      oldDelegate.controller != controller || oldDelegate.renderer != renderer;
+      oldDelegate.controller != controller ||
+      oldDelegate.renderer != renderer ||
+      oldDelegate.devicePixelRatio != devicePixelRatio;
 }
