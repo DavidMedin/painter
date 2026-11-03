@@ -18,5 +18,5 @@ At the start of every session, read these files in order:
 - Record durable technical choices in `docs/decisions/`; do not treat proposals as decisions.
 - Distinguish verified facts from assumptions. Do not invent product requirements or claim unsupported platform support.
 - macOS is the current target. Linux, Windows, and Android are future targets; their rollout order is undecided.
-- Do not prescribe code architecture or coding conventions before the project has code.
+- Follow the [code commenting standard](docs/decisions/0007-code-commenting-standard.md) for all code in `lib/` and `test/`. Other coding conventions and code architecture are not prescribed beyond what `docs/architecture.md` and the ADRs record.
 - Follow `docs/version-control.md`: do feature work in a git worktree, and when it is complete commit it with `git` on its feature branch, stacked on the owner's current work, so it is visible in the owner's JJ repo. Uncommitted worktree changes are invisible to the owner.

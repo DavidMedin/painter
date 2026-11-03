@@ -14,5 +14,6 @@ macOS is the current target. Linux, Windows, and Android are future targets; the
 - [Current status](docs/status.md)
 - [Testing](docs/testing.md)
 - [Architecture decision records](docs/decisions/README.md)
+- [Code commenting standard](docs/decisions/0007-code-commenting-standard.md)
 - [Version control: JJ, Git, and worktrees](docs/version-control.md)
 - [Task backlog](tasks/README.md)

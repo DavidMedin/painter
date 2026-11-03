@@ -34,5 +34,9 @@
 - **Boundary:** the core (`TileCache`, `TiledRenderer`, `lib/canvas/tile_stats.dart`) only records counters and per-frame tile classification and never imports debug UI. The pane reads one frozen snapshot per refresh and writes only `maxInFlight`, `maxTiles`, `invalidateAll()`, `resetViewport()`, and the overlay switches.
 - **Evidence:** unit tests drive a real `TiledRenderer` to check the per-frame classification and counters; widget tests cover the kit and the pane in the real `PainterApp` (toggle, live numbers, pause, controls, overlays, report, no interference with drawing).
 
+## Code Documentation
+
+- All code in `lib/` and `test/` follows the [code commenting standard](decisions/0007-code-commenting-standard.md): a What/Why header per file, an overview in the primary file of each general system, doc comments on non-obvious functions, named coupling, and comments kept in step with the code.
+
 ## Decisions Not Yet Made
 

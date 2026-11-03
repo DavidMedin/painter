@@ -86,6 +86,7 @@
 ## Code Comments Verification (documentation-only, out-of-roadmap)
 
 - Direct user request: every file gets a What/Why header; each general system gets a semi-large overview (tile cache in `tile_cache.dart`, pencil splats in `pencil_splats.dart`, canvas state model in `canvas_controller.dart`, input handling in `canvas_view.dart`, ImGui kit in `imgui.dart`, debug pane in `canvas_debug_pane.dart`, open/save flow in `document_file_service.dart`, app shell in `main.dart`, splat-worker message protocol in `splat_worker.dart`); non-obvious functions are documented and name their coupled functions. All 15 files under `lib/` and all 11 under `test/` are covered. Developed in the git worktree on branch `wt/20261102-204749`.
+- The standard is recorded as [ADR 0007](decisions/0007-code-commenting-standard.md) and referenced from `AGENTS.md`, `README.md`, and `docs/architecture.md`; `AGENTS.md` no longer says conventions are unprescribed.
 - Comment-only: a diff filter over `lib/` and `test/` showed no added or removed line that is not a comment or blank, and no added line over 80 columns. No code, identifier, import, or test expectation changed.
 - `flutter analyze` — passed: `No issues found!`.
 - `flutter test` — passed all 82 tests (unchanged count).
