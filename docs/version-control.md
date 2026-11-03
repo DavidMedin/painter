@@ -16,7 +16,7 @@ Key consequences:
 
 - **Uncommitted work in a worktree is invisible to the owner.** JJ snapshots only the main checkout's directory. Files sitting in another worktree's directory are never imported, so `jj log` and `jj st` in the main checkout show nothing of them.
 - **A Git commit is visible.** Worktrees share the main repo's Git object store. A commit made with `git commit` in a worktree is reachable from the main checkout's `.git`, and JJ imports Git branches into its own bookmarks automatically the next time any `jj` command runs there.
-- **Do not make JJ commits inside a worktree.** A worktree created from this repo contains its own copy of `.jj/` (observed: the APFS clone duplicates it), and that copy has a separate JJ operation store. JJ changes made there do not appear in the owner's repo. Use plain `git` inside worktrees.
+- **Do not make JJ commits inside a worktree.** A worktree created from this repo contains its own copy of `.jj/` (observed: `ls` shows one in the APFS-cloned worktree, and `jj st` there reports the worktree's own changes). A copied `.jj/` is a separate JJ repo store, so JJ commits made there are expected not to appear in the owner's repo; this was not tested. Use plain `git` inside worktrees.
 - **Git worktrees and JJ workspaces are different things.** `git worktree` is what this project uses. `jj workspace add` creates JJ-native workspaces that share one JJ repo; it is not part of this workflow.
 
 ## Starting a feature
@@ -38,50 +38,62 @@ Do all feature work, tests, and builds inside `../painter-<feature>`. Edit files
    ```sh
    cd ../painter-<feature>
    git add -A
+   git status --short          # confirm only intended files are staged
    git commit -m "<what changed and why>"
    ```
 
-   Stage only intended files. Do not include `build/`, `.dart_tool/`, or other ignored output; check `git status` first.
+   Do not stage `build/`, `.dart_tool/`, or other ignored output.
 
-2. **Stack it on the owner's current work.** The branch must descend from whatever the owner is building on, not from an older commit, or the work shows up as a side branch the owner must rebase by hand. Rebase the feature branch onto the owner's current tip (the commit the owner's `@` sits on, found with `jj log` in the main checkout), still using Git in the worktree:
-
-   ```sh
-   git rebase <owner-tip-commit>
-   ```
-
-   Rerun `flutter analyze` and `flutter test` if the rebase changed anything.
-
-3. **Tell JJ about it.** In the main checkout any `jj` command imports the new Git commits and moves the bookmark of the same name:
+2. **Make JJ import it and check it from the owner's side.** Any `jj` command in the main checkout imports new Git commits and creates or moves the bookmark of the same name. Read-only is enough:
 
    ```sh
-   jj log -r '<feature-branch>'
+   cd ../painter
+   jj log -r '<feature-branch> | @'
    ```
 
-   The commit and its bookmark are now visible as ordinary JJ changes.
+   Right after step 1 the feature commit appears as a **sibling** of the owner's working copy `@` (both on the commit the branch was cut from). That is visible but not yet "on top of" the owner's work.
 
-4. **The owner adopts it with normal JJ operations,** for example:
+3. **Stack it on the owner's current work.** The owner's `@` is often an empty change, so the content is identical and stacking is only a matter of parentage. Rebase *only the feature change* onto `@`; this does not move or edit `@`:
 
    ```sh
-   jj rebase -r @ -d <feature-branch>   # put the owner's working copy on top of the feature
-   jj new <feature-branch>              # or start a fresh change on top of it
+   jj rebase -r <feature-branch> -d @
    ```
 
-   or `jj bookmark set main -r <feature-branch>` if the project has a main bookmark to advance. Which of these applies is the owner's call; agents do not move the owner's `@`.
+   If the owner's `@` has real content, this puts the feature on top of it; resolve any conflicts JJ reports before handing off. Rebase with `jj` rather than `git rebase` in the worktree: JJ is the owner's tool and it tracks `@`, whose commit id changes whenever the owner edits.
 
-5. **Clean up after adoption.**
+4. **Re-attach the worktree.** The JJ rebase rewrites the feature commit and moves the Git branch to the new commit id. The worktree still has the *old* commit checked out, so it shows a detached `HEAD`. Switch it to the branch again:
+
+   ```sh
+   cd ../painter-<feature>
+   git switch <feature-branch>
+   ```
+
+   Further commits in the worktree then build on the stacked commit. Never `git commit` while detached; that work is not on the branch.
+
+5. **Hand off.** Report the branch name, its tip commit, and the command that shows it (`jj log -r '<feature-branch>'`). The commit's tree is what the agent tested, so re-run `flutter analyze` and `flutter test` only if the stacking involved conflicts or the owner's `@` had real changes.
+
+6. **The owner adopts it.** The owner chooses; agents do not move `@`. Typical options:
+
+   ```sh
+   jj new <feature-branch>               # start the next change on top of the feature
+   jj rebase -r @ -d <feature-branch>    # move the current working change onto it
+   jj bookmark set main -r <feature-branch>   # advance a main bookmark, if the project has one
+   ```
+
+7. **Clean up after adoption.**
 
    ```sh
    git worktree remove ../painter-<feature>
-   git branch -d <feature-branch>       # or `jj bookmark delete <feature-branch>`
+   jj bookmark delete <feature-branch>   # or `git branch -d <feature-branch>`
    ```
 
 ## What agents must and must not do
 
 - Work in a worktree on a feature branch; do not edit the main checkout's files.
 - Commit with `git` when a unit of work is complete, so the work is visible. Uncommitted work in a worktree is not delivered.
-- Do not run mutating `jj` commands (`jj new`, `jj rebase`, `jj abandon`, `jj edit`, `jj squash`, `jj bookmark set`) in the main checkout without the owner asking. Read-only `jj log`, `jj st`, and `jj show` are fine.
+- In the main checkout, read-only `jj log`, `jj st`, `jj show`, and `jj diff` are always fine. Do not run other mutating `jj` commands (`jj new`, `jj edit`, `jj abandon`, `jj squash`, `jj bookmark set`) there without the owner asking. The one sanctioned exception, when the owner asks for the work to be on top of theirs, is `jj rebase -r <feature-branch> -d @`, which rewrites only the feature change.
+- Never move, edit, or describe the owner's `@`.
 - Do not rewrite or delete commits and branches that already existed before the task.
-- Report the branch name and tip commit when handing off, plus the exact `jj` command that shows it.
 
 ## Not verified
 
