@@ -18,6 +18,7 @@ enum _Interaction { draw, pan, rotate }
 
 class _CanvasViewState extends State<CanvasView> {
   final Map<int, _PointerInteraction> _interactions = {};
+  _TrackpadGesture? _trackpadGesture;
   final GlobalKey _surfaceKey = GlobalKey();
 
   Size get _viewportSize {
@@ -102,6 +103,42 @@ class _CanvasViewState extends State<CanvasView> {
     );
   }
 
+  void _onPanZoomStart(PointerPanZoomStartEvent event) {
+    _trackpadGesture = _TrackpadGesture(event.localPosition);
+  }
+
+  void _onPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    final gesture = _trackpadGesture;
+    if (gesture == null) return;
+
+    if (event.panDelta != Offset.zero) {
+      widget.controller.panBy(event.panDelta);
+    }
+
+    final viewportSize = _viewportSize;
+    if (event.scale != gesture.lastScale) {
+      widget.controller.zoomAt(
+        gesture.focalPoint,
+        viewportSize,
+        event.scale / gesture.lastScale,
+      );
+      gesture.lastScale = event.scale;
+    }
+
+    if (event.rotation != gesture.lastRotation) {
+      widget.controller.rotateAt(
+        gesture.focalPoint,
+        viewportSize,
+        event.rotation - gesture.lastRotation,
+      );
+      gesture.lastRotation = event.rotation;
+    }
+  }
+
+  void _onPanZoomEnd(PointerPanZoomEndEvent event) {
+    _trackpadGesture = null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
@@ -113,6 +150,9 @@ class _CanvasViewState extends State<CanvasView> {
         onPointerMove: _onPointerMove,
         onPointerUp: _finishPointer,
         onPointerCancel: _finishPointer,
+        onPointerPanZoomStart: _onPanZoomStart,
+        onPointerPanZoomUpdate: _onPanZoomUpdate,
+        onPointerPanZoomEnd: _onPanZoomEnd,
         onPointerSignal: _onPointerSignal,
         child: CustomPaint(
           painter: _CanvasPainter(widget.controller),
@@ -128,6 +168,14 @@ class _PointerInteraction {
 
   final _Interaction mode;
   Offset lastPosition;
+}
+
+class _TrackpadGesture {
+  _TrackpadGesture(this.focalPoint);
+
+  final Offset focalPoint;
+  double lastScale = 1;
+  double lastRotation = 0;
 }
 
 class _CanvasPainter extends CustomPainter {
