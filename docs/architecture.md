@@ -55,16 +55,24 @@
 
 ## Docked pane system and diagnostics
 
-- **Pane layout:** `lib/ui/pane_system.dart` owns stable pane ids and Canvas,
-  Diagnostics, Settings, and Manual modes in a binary split tree. Each split is
-  side-by-side or top-and-bottom; axes can be nested, and each draggable divider
-  resizes only its two children. A Manual pane stores its selected `HelpId`; F1
-  reuses and focuses an existing Manual pane, or opens the article beside the
-  widest leaf with a horizontal split. Each pane has an emphasized content
-  selector, a Split menu, and a Close action when another pane remains. F3 adds
-  Diagnostics beside Canvas and removes it on the next press; a sole Diagnostics
-  pane becomes Canvas. See [ADR 0010](decisions/0010-pane-system.md) for pane
-  mechanics and [ADR 0013](decisions/0013-docked-manual-pane.md) for Manual.
+- **Pane layout:** `lib/ui/pane_system.dart` owns Canvas, Diagnostics, Settings,
+  and Manual modes in a nested binary split tree. Manual panes retain a selected
+  `HelpId`; F1 focuses an existing Manual pane or inserts one beside the widest
+  leaf. Each split has a visible 12-logical-pixel handle when space permits,
+  clamped to the available extent, with right-click split/close actions for its
+  adjacent panes. Focused and inactive borders are distinct, and non-Canvas
+  content uses the active theme surface. Headers switch to compact actions below
+  180 logical pixels and omit controls below 48. F3 adds or removes Diagnostics.
+  See [ADR 0010](decisions/0010-pane-system.md) for pane mechanics and
+  [ADR 0013](decisions/0013-docked-manual-pane.md) for Manual.
+- **Evidence:** headless tests cover pane-mode selection, Settings, both split
+  axes, resizing, close, F3, widest-leaf Manual placement and reuse, article
+  navigation, themed surfaces, border/handle contrast, divider right-click
+  actions, and a 14-logical-pixel pane without overflow. Diagnostics, controls,
+  overlays, reports, and continued drawing remain covered. Canvas tests verify
+  shared documents with independent viewports and fixed-white paper under a dark
+  theme. App workflows cover opening resets, file-error Details help to Manual,
+  and the two-Canvas document path. macOS window appearance is not verified.
 - **Content ownership:** `PainterApp` shares one document controller across Canvas panes and owns one `TiledRenderer` per pane plus one `CanvasViewportController` per Canvas pane. Diagnostics reads the first visible Canvas pane's renderer and viewport; when no Canvas is visible, it uses its own retained renderer and viewport. `CanvasDebugPane` remains scrollable pane content, not a floating window.
 - **Diagnostics:** `lib/debug/imgui.dart` is a reusable, painter-agnostic widget
   kit in the style of Dear ImGui (collapsible sections, rows, checkbox, button,
@@ -81,14 +89,14 @@
   articles. F1 prefers hovered help, then keyboard focus, then general help.
   `TouchTargetSettings` provides app-wide 48-logical-pixel standard and
   56-logical-pixel enlarged minimum heights.
-- **Evidence:** headless tests cover Pane Mode selection, the app's Settings
-  route, both split axes, resizing, close, F3 behavior, widest-leaf Manual
-  placement and pane reuse, article navigation, live diagnostics, pause,
-  controls, overlays, reports, and continued drawing. Canvas tests verify shared
-  documents with independent viewports and fixed-white paper under a dark theme.
-  The app-level document workflow draws through two Canvas panes, verifies
-  opening resets both viewport transforms, and routes file-error Details help to
-  Manual. macOS window appearance is not verified.
+- **Evidence:** headless tests cover pane-mode selection, Settings, both split
+  axes, resizing, close, F3, widest-leaf Manual placement and reuse, article
+  navigation, themed surfaces, border/handle contrast, divider right-click
+  actions, and a 14-logical-pixel pane without overflow. Diagnostics, controls,
+  overlays, reports, and continued drawing remain covered. Canvas tests verify
+  shared documents with independent viewports and fixed-white paper under a dark
+  theme. App workflows cover opening resets, file-error Details help to Manual,
+  and the two-Canvas document path. macOS window appearance is not verified.
 
 ## Code Documentation
 

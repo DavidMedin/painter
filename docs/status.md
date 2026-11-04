@@ -174,11 +174,32 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 
 ## Manual and Binary Split-Tree Integration Verification
 
-- Preserved `rl`'s nested horizontal/vertical split tree and integrated Manual
-  as a pane leaf. F1 routes the selected help article into an existing Manual
-  pane or inserts one beside the widest leaf; selecting another article updates
-  that pane. See [ADR 0013](decisions/0013-docked-manual-pane.md). The app-level
-  file-error Details route remains covered.
-- `flutter test test/ui/pane_system_test.dart test/document/document_file_workflow_test.dart` — exited 0. `flutter test` — passed all 101 tests. `flutter analyze` — passed: `No issues found!`.
-- `flutter build macos --release` — passed; built `build/macos/Build/Products/Release/painter.app` (43.3 MB). Xcode logged the `Any Mac` placeholder warning, an arm64-only suggestion, and stale-file warnings for artifacts under `/Users/medindj1/small-projects/painter/build/` outside this worktree; the build still succeeded.
-- The file-failure workflow emitted its expected `FormatException` and `PathNotFoundException` diagnostics; the full suite passed. No GUI window was opened or foregrounded. T-005 remains in progress pending live visual verification.
+- Integrated Manual as a pane leaf. F1 reuses an existing Manual pane or inserts
+  one beside the widest leaf; selecting another article updates that pane. The
+  app-level file-error Details route is covered. See [ADR 0013](decisions/0013-docked-manual-pane.md).
+- Before the pane-rendering change was stacked, focused pane/document tests and
+  the full suite passed; `flutter test` reported 101 tests and `flutter analyze`
+  reported `No issues found!`. The Release build succeeded at 43.3 MB. Xcode
+  emitted its `Any Mac` placeholder, arm64-only, and stale-artifact warnings.
+- The file-failure workflow emitted its expected `FormatException` and
+  `PathNotFoundException` diagnostics. No GUI window was opened; T-005 remains
+  in progress pending live visual verification.
+
+## Pane Rendering and Narrow Layout Fix (out-of-roadmap UI fix)
+
+- Pane surfaces and borders follow the active theme; visible 12-logical-pixel
+  divider hit areas clamp to narrow split extents and open adjacent-pane actions
+  on right-click. Headers use a compact action menu below 180 logical pixels
+  and omit controls below 48 pixels.
+- Before stacking, `flutter test test/ui/pane_system_test.dart` passed all 6
+  tests, `flutter test` passed all 102 tests, and `flutter analyze` reported
+  `No issues found!`. The narrow-layout test verified a 14-logical-pixel pane
+  without overflow and exercised its compact mode action.
+- Verification was headless; no GUI window was opened or visually inspected.
+
+- Combined rebased-tree verification: `flutter test test/ui/pane_system_test.dart`
+  passed all 7 tests; `flutter test` passed all 104 tests; `flutter analyze`
+  reported `No issues found!`. Coverage includes compact-mode Manual selection
+  and docked Manual navigation; the widget tests reported no layout exceptions.
+  T-005 remains in progress.
+

@@ -207,8 +207,9 @@ class ManualCatalog {
       section: 'Workspace',
       content:
           'Use Split to divide a pane side-by-side or top-and-bottom. Drag a '
-          'divider to resize its two child panes. Close removes a pane; the '
-          'final pane cannot be closed.',
+          'divider to resize its two child panes, or right-click it to split '
+          'or close an adjacent pane. Close removes a pane; the final pane '
+          'cannot be closed.',
     ),
     HelpId.themeMode: ManualArticle(
       id: HelpId.themeMode,

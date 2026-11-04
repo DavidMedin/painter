@@ -17,7 +17,6 @@ import 'package:flutter/material.dart';
 import 'manual_catalog.dart';
 export 'manual_catalog.dart' show HelpId, HelpIds;
 
-/// Tracks the hovered and keyboard-focused ids used to open manual pages.
 class HelpState extends ChangeNotifier {
   HelpId? _hovered;
   HelpId? _focused;

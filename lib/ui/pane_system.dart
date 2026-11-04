@@ -263,10 +263,10 @@ class PaneSystemState extends State<PaneSystem> {
     final split = node as _PaneSplit;
     return LayoutBuilder(
       builder: (context, constraints) {
-        const dividerExtent = 8.0;
         final extent = split.axis == Axis.horizontal
             ? constraints.maxWidth
             : constraints.maxHeight;
+        final dividerExtent = math.min(12.0, math.max(0.0, extent));
         final available = math.max(0.0, extent - dividerExtent);
         final firstFlex = math.max(1, (split.firstWeight * 1000).round());
         final secondFlex = math.max(1, (split.secondWeight * 1000).round());
@@ -278,7 +278,7 @@ class PaneSystemState extends State<PaneSystem> {
           flex: secondFlex,
           child: _buildNode(context, split.second),
         );
-        final divider = _buildDivider(split, available);
+        final divider = _buildDivider(split, available, dividerExtent);
         return split.axis == Axis.horizontal
             ? Row(children: [first, divider, second])
             : Column(children: [first, divider, second]);
@@ -308,14 +308,19 @@ class PaneSystemState extends State<PaneSystem> {
           border: Border.all(
             color: pane.id == _focusedPaneId
                 ? theme.colorScheme.primary
-                : theme.dividerColor,
-            width: 1,
+                : theme.colorScheme.outlineVariant,
+            width: 2,
           ),
         ),
         child: Column(
           children: [
             _buildHeader(context, pane),
-            Expanded(child: widget.contentBuilder(context, descriptor)),
+            Expanded(
+              child: Material(
+                color: theme.colorScheme.surface,
+                child: widget.contentBuilder(context, descriptor),
+              ),
+            ),
           ],
         ),
       ),
@@ -335,147 +340,218 @@ class PaneSystemState extends State<PaneSystem> {
       ),
       child: SizedBox(
         height: height,
-        child: Row(
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: HelpTarget(
-                  topic: HelpIds.paneType,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.primaryContainer,
-                      border: Border.all(color: scheme.primary),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<PaneKind>(
-                        key: ValueKey('pane-mode-${pane.id}'),
-                        value: pane.kind,
-                        isExpanded: true,
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          color: scheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w600,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 48) return const SizedBox.expand();
+            if (constraints.maxWidth < 180) {
+              return _buildCompactHeader(context, pane, height, scheme);
+            }
+            return Row(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: HelpTarget(
+                      topic: HelpIds.paneType,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          border: Border.all(color: scheme.primary),
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                        iconEnabledColor: scheme.onPrimaryContainer,
-                        dropdownColor: scheme.surface,
-                        borderRadius: BorderRadius.circular(4),
-                        items: [
-                          for (final kind in PaneKind.values)
-                            DropdownMenuItem(
-                              value: kind,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(kind.icon, size: 18),
-                                  const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      kind.label,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<PaneKind>(
+                            key: ValueKey('pane-mode-${pane.id}'),
+                            value: pane.kind,
+                            isExpanded: true,
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: scheme.onPrimaryContainer,
+                              fontWeight: FontWeight.w600,
                             ),
-                        ],
-                        selectedItemBuilder: (context) => [
-                          for (final kind in PaneKind.values)
-                            Row(
+                            iconEnabledColor: scheme.onPrimaryContainer,
+                            dropdownColor: scheme.surface,
+                            borderRadius: BorderRadius.circular(4),
+                            items: [
+                              for (final kind in PaneKind.values)
+                                DropdownMenuItem(
+                                  value: kind,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(kind.icon, size: 18),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          kind.label,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                            selectedItemBuilder: (context) => [
+                              for (final kind in PaneKind.values)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(kind.icon, size: 12),
+                                    Flexible(
+                                      child: Text(
+                                        kind.label,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                            onChanged: (kind) {
+                              if (kind != null) _setPaneKind(pane.id, kind);
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: HelpTarget(
+                    topic: HelpIds.paneBoundary,
+                    child: PopupMenuButton<Axis>(
+                      key: ValueKey('split-menu-${pane.id}'),
+                      padding: EdgeInsets.zero,
+                      onSelected: (axis) => _splitPane(pane.id, axis: axis),
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: Axis.horizontal,
+                          child: Text('Side by side'),
+                        ),
+                        PopupMenuItem(
+                          value: Axis.vertical,
+                          child: Text('Top and bottom'),
+                        ),
+                      ],
+                      child: Material(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(4),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: height),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(kind.icon, size: 14),
-                                const SizedBox(width: 2),
+                                Icon(
+                                  Icons.call_split,
+                                  size: 18,
+                                  color: scheme.onPrimary,
+                                ),
+                                const SizedBox(width: 6),
                                 Flexible(
                                   child: Text(
-                                    kind.label,
+                                    'Split',
                                     overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(color: scheme.onPrimary),
                                   ),
                                 ),
                               ],
                             ),
-                        ],
-                        onChanged: (kind) {
-                          if (kind != null) _setPaneKind(pane.id, kind);
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: HelpTarget(
-                topic: HelpIds.paneBoundary,
-                child: PopupMenuButton<Axis>(
-                  key: ValueKey('split-menu-${pane.id}'),
-                  padding: EdgeInsets.zero,
-                  onSelected: (axis) => _splitPane(pane.id, axis: axis),
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      value: Axis.horizontal,
-                      child: Text('Side by side'),
-                    ),
-                    PopupMenuItem(
-                      value: Axis.vertical,
-                      child: Text('Top and bottom'),
-                    ),
-                  ],
-                  child: Material(
-                    color: scheme.primary,
-                    borderRadius: BorderRadius.circular(4),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minHeight: height),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.call_split,
-                              size: 18,
-                              color: scheme.onPrimary,
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                'Split',
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: scheme.onPrimary),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
-            if (paneCount > 1) ...[
-              const SizedBox(width: 4),
-              Flexible(
-                child: PainterActionButton(
-                  icon: Icons.close,
-                  label: 'Close',
-                  topic: HelpIds.paneBoundary,
-                  onPressed: () => _closePane(pane.id),
-                  minimumHeight: height,
-                ),
-              ),
-            ],
-            const SizedBox(width: 4),
-          ],
+                if (paneCount > 1) ...[
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: PainterActionButton(
+                      icon: Icons.close,
+                      label: 'Close',
+                      topic: HelpIds.paneBoundary,
+                      onPressed: () => _closePane(pane.id),
+                      minimumHeight: height,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  /// Provides an axis-appropriate drag target for a split divider.
-  Widget _buildDivider(_PaneSplit split, double availableExtent) {
+  /// Keeps mode and split actions available when a pane is too narrow for labels.
+  Widget _buildCompactHeader(
+    BuildContext context,
+    _Pane pane,
+    double height,
+    ColorScheme scheme,
+  ) {
+    return PopupMenuButton<_CompactPaneAction>(
+      key: ValueKey('pane-actions-${pane.id}'),
+      tooltip: 'Pane actions: ${pane.kind.label}',
+      onSelected: (action) {
+        switch (action) {
+          case _CompactPaneAction.canvas:
+            _setPaneKind(pane.id, PaneKind.canvas);
+          case _CompactPaneAction.diagnostics:
+            _setPaneKind(pane.id, PaneKind.diagnostics);
+          case _CompactPaneAction.settings:
+            _setPaneKind(pane.id, PaneKind.settings);
+          case _CompactPaneAction.manual:
+            _setPaneKind(pane.id, PaneKind.manual);
+          case _CompactPaneAction.splitSideBySide:
+            _splitPane(pane.id, axis: Axis.horizontal);
+          case _CompactPaneAction.splitTopAndBottom:
+            _splitPane(pane.id, axis: Axis.vertical);
+          case _CompactPaneAction.close:
+            _closePane(pane.id);
+        }
+      },
+      itemBuilder: (context) => [
+        for (final kind in PaneKind.values)
+          PopupMenuItem(
+            value: switch (kind) {
+              PaneKind.canvas => _CompactPaneAction.canvas,
+              PaneKind.diagnostics => _CompactPaneAction.diagnostics,
+              PaneKind.settings => _CompactPaneAction.settings,
+              PaneKind.manual => _CompactPaneAction.manual,
+            },
+            child: Text(kind.label),
+          ),
+        const PopupMenuItem(
+          value: _CompactPaneAction.splitSideBySide,
+          child: Text('Split side-by-side'),
+        ),
+        const PopupMenuItem(
+          value: _CompactPaneAction.splitTopAndBottom,
+          child: Text('Split top-and-bottom'),
+        ),
+        if (_panes.length > 1)
+          const PopupMenuItem(
+            value: _CompactPaneAction.close,
+            child: Text('Close pane'),
+          ),
+      ],
+      child: SizedBox(
+        height: height,
+        child: Center(child: Icon(pane.kind.icon, color: scheme.primary)),
+      ),
+    );
+  }
+
+  /// Builds a visible resize handle whose context menu also edits adjacent panes.
+  Widget _buildDivider(
+    _PaneSplit split,
+    double availableExtent,
+    double dividerExtent,
+  ) {
     final isSideBySide = split.axis == Axis.horizontal;
     return HelpTarget(
       topic: HelpIds.paneBoundary,
@@ -485,6 +561,8 @@ class PaneSystemState extends State<PaneSystem> {
             : SystemMouseCursors.resizeRow,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
+          onSecondaryTapDown: (details) =>
+              _showBoundaryMenu(context, split, details.globalPosition),
           onHorizontalDragUpdate: isSideBySide
               ? (details) =>
                     _resizeSplit(split, details.delta.dx, availableExtent)
@@ -496,13 +574,19 @@ class PaneSystemState extends State<PaneSystem> {
           child: Semantics(
             label: 'Resize pane boundary',
             child: SizedBox(
-              width: isSideBySide ? 8 : double.infinity,
-              height: isSideBySide ? double.infinity : 8,
-              child: Center(
-                child: Container(
-                  width: isSideBySide ? 1 : double.infinity,
-                  height: isSideBySide ? double.infinity : 1,
-                  color: Theme.of(context).dividerColor,
+              width: isSideBySide ? dividerExtent : double.infinity,
+              height: isSideBySide ? double.infinity : dividerExtent,
+              child: ColoredBox(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: Center(
+                  child: Container(
+                    width: isSideBySide ? math.min(4.0, dividerExtent) : 32,
+                    height: isSideBySide ? 32 : math.min(4.0, dividerExtent),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -511,6 +595,77 @@ class PaneSystemState extends State<PaneSystem> {
       ),
     );
   }
+
+  /// Opens edit actions for the panes nearest the clicked divider.
+  Future<void> _showBoundaryMenu(
+    BuildContext context,
+    _PaneSplit split,
+    Offset globalPosition,
+  ) async {
+    final firstPane = _edgePane(split.first, trailing: true);
+    final secondPane = _edgePane(split.second, trailing: false);
+    final firstSide = split.axis == Axis.horizontal ? 'left' : 'top';
+    final secondSide = split.axis == Axis.horizontal ? 'right' : 'bottom';
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final localPosition = overlay.globalToLocal(globalPosition);
+    final action = await showMenu<_BoundaryAction>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        localPosition.dx,
+        localPosition.dy,
+        overlay.size.width - localPosition.dx,
+        overlay.size.height - localPosition.dy,
+      ),
+      items: [
+        PopupMenuItem(
+          value: _BoundaryAction(firstPane.id, axis: Axis.horizontal),
+          child: Text('Split $firstSide pane side-by-side'),
+        ),
+        PopupMenuItem(
+          value: _BoundaryAction(firstPane.id, axis: Axis.vertical),
+          child: Text('Split $firstSide pane top-and-bottom'),
+        ),
+        PopupMenuItem(
+          value: _BoundaryAction(firstPane.id),
+          child: Text('Close $firstSide pane'),
+        ),
+        PopupMenuItem(
+          value: _BoundaryAction(secondPane.id, axis: Axis.horizontal),
+          child: Text('Split $secondSide pane side-by-side'),
+        ),
+        PopupMenuItem(
+          value: _BoundaryAction(secondPane.id, axis: Axis.vertical),
+          child: Text('Split $secondSide pane top-and-bottom'),
+        ),
+        PopupMenuItem(
+          value: _BoundaryAction(secondPane.id),
+          child: Text('Close $secondSide pane'),
+        ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    if (action.axis == null) {
+      _closePane(action.paneId);
+    } else {
+      _splitPane(action.paneId, axis: action.axis!);
+    }
+  }
+}
+
+/// One split or close operation selected from a divider's context menu.
+class _BoundaryAction {
+  const _BoundaryAction(this.paneId, {this.axis});
+
+  final int paneId;
+  final Axis? axis;
+}
+
+/// Returns the leaf at the edge of [node] facing its parent divider.
+_Pane _edgePane(_LayoutNode node, {required bool trailing}) {
+  if (node is _Pane) return node;
+  final split = node as _PaneSplit;
+  return _edgePane(trailing ? split.second : split.first, trailing: trailing);
 }
 
 /// Finds leaves in visual order, which also defines the Diagnostics source.
@@ -585,4 +740,14 @@ class _PaneSplit extends _LayoutNode {
   _LayoutNode second;
   double firstWeight = 1;
   double secondWeight = 1;
+}
+
+enum _CompactPaneAction {
+  canvas,
+  diagnostics,
+  settings,
+  manual,
+  splitSideBySide,
+  splitTopAndBottom,
+  close,
 }

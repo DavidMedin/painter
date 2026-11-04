@@ -1,7 +1,7 @@
-// What: Widget tests cover pane mode, contextual help, split direction,
-//   resizing, focus, close, and docked Manual placement.
-// Why: PaneSystem owns pane identity and split weights; Manual must fit the
-//   nested tree without disturbing existing pane content or geometry.
+// What: Widget tests cover pane modes, Manual placement, visible surfaces and
+//   borders, split direction, resizing, divider actions, focus, and close.
+// Why: PaneSystem owns pane identity and split weights; tests protect its nested
+//   layout, mode changes, and behavior when space is too narrow for full actions.
 // Covers: lib/ui/pane_system.dart (PaneSystem and PaneSystemState).
 
 import 'package:flutter/gestures.dart';
@@ -113,6 +113,118 @@ void main() {
     expect(find.text('diagnostics-0'), findsOneWidget);
   });
 
+  testWidgets('non-canvas pane content rests on the themed surface', (
+    tester,
+  ) async {
+    final theme = ThemeData.dark();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: theme,
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: PaneSystem(
+              contentBuilder: _content,
+              onPaneRemoved: (_) {},
+              onPaneTypeChanged: (_, _) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Side by side'));
+    await tester.pumpAndSettle();
+
+    final pane = find.byKey(const ValueKey('pane-1'));
+    final surface = find.descendant(
+      of: pane,
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Material && widget.color == theme.colorScheme.surface,
+      ),
+    );
+    expect(surface, findsOneWidget);
+    expect(find.text('diagnostics-1'), findsOneWidget);
+  });
+
+  testWidgets('right-clicking a divider splits and closes adjacent panes', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Side by side'));
+    await tester.pumpAndSettle();
+
+    var divider = find.bySemanticsLabel('Resize pane boundary').first;
+    await tester.tapAt(
+      tester.getCenter(divider),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Split left pane top-and-bottom'));
+    await tester.pumpAndSettle();
+    expect(find.text('canvas-0'), findsOneWidget);
+    expect(find.text('diagnostics-2'), findsOneWidget);
+
+    divider = find.bySemanticsLabel('Resize pane boundary').first;
+    await tester.tapAt(
+      tester.getCenter(divider),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Close top pane'));
+    await tester.pumpAndSettle();
+    expect(find.text('canvas-0'), findsNothing);
+    expect(find.text('diagnostics-2'), findsOneWidget);
+    expect(find.text('diagnostics-1'), findsOneWidget);
+  });
+
+  testWidgets('narrow panes keep controls usable without layout overflow', (
+    tester,
+  ) async {
+    final originalSize = tester.view.physicalSize;
+    addTearDown(() => tester.view.physicalSize = originalSize);
+    await tester.pumpWidget(_host());
+
+    Future<void> splitFirstPane() async {
+      await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Side by side'));
+      await tester.pumpAndSettle();
+    }
+
+    await splitFirstPane();
+    await splitFirstPane();
+    await splitFirstPane();
+    final compactMenu = find.byKey(const ValueKey('pane-actions-0'));
+    expect(compactMenu, findsOneWidget);
+    await tester.tap(compactMenu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    expect(find.text('settings-0'), findsOneWidget);
+    await tester.tap(compactMenu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Manual').last);
+    await tester.pumpAndSettle();
+    expect(find.text('manual-0'), findsOneWidget);
+
+    final devicePixelRatio = tester.view.devicePixelRatio;
+    tester.view.physicalSize = Size(
+      40 * devicePixelRatio,
+      200 * devicePixelRatio,
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('pane-1'))).width,
+      closeTo(14, 1),
+    );
+    expect(find.byKey(const ValueKey('pane-mode-1')), findsNothing);
+  });
   testWidgets('side-by-side and top-bottom splits resize and close', (
     tester,
   ) async {
@@ -129,7 +241,28 @@ void main() {
     final primary = Theme.of(tester.element(find.byType(PaneSystem)))
         .colorScheme
         .primary;
-    expect(_paneBorderColor(tester, 1), primary);
+    final inactiveListener = tester.widget<Listener>(
+      find.byKey(const ValueKey('pane-0')),
+    );
+    final inactiveDecoration = inactiveListener.child! as DecoratedBox;
+    final inactiveBorder =
+        (inactiveDecoration.decoration as BoxDecoration).border! as Border;
+    expect(
+      inactiveBorder.top.color,
+      Theme.of(tester.element(pane)).colorScheme.outlineVariant,
+    );
+    expect(inactiveBorder.top.width, 2);
+    final divider = find.bySemanticsLabel('Resize pane boundary');
+    expect(tester.getSize(divider).width, 12);
+    final handleBackground = tester.widget<ColoredBox>(
+      find.descendant(of: divider, matching: find.byType(ColoredBox)),
+    );
+    expect(
+      handleBackground.color,
+      Theme.of(tester.element(pane)).colorScheme.surfaceContainerHighest,
+    );
+    final grip = find.descendant(of: divider, matching: find.byType(Container));
+    expect(tester.getSize(grip).width, 4);
     await tester.tap(find.text('canvas-0'));
     await tester.pump();
     expect(_paneBorderColor(tester, 0), primary);
@@ -222,8 +355,9 @@ void main() {
       lessThan(tester.getTopLeft(paneTwo).dx),
     );
 
-    final saveDocumentItem =
-        find.byKey(const ValueKey('manual-item-saveDocument'));
+    final saveDocumentItem = find.byKey(
+      const ValueKey('manual-item-saveDocument'),
+    );
     await tester.ensureVisible(saveDocumentItem);
     await tester.tap(saveDocumentItem);
     await tester.pumpAndSettle();
