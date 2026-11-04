@@ -9,18 +9,19 @@
 // ---------------------------------------------------------------------------
 // Pane-system overview
 //
-// Each pane has a stable identity and one implemented content kind: Canvas or
-// Diagnostics. The first pane is a Canvas. Its top-left selector can change
-// content, Split creates a neighboring pane of the other kind, and Close
-// removes a pane while at least one remains. F3 adds or removes a Diagnostics
-// pane beside Canvas; if Diagnostics is the sole pane, F3 changes it to Canvas.
-// A row of panes shares available width by positive weights. Dragging a divider
+// Each pane has a stable identity and one implemented content kind: Canvas,
+// Diagnostics, or Settings. The first pane is a Canvas. Its top-left selector
+// can change content, Split creates a neighboring pane, and Close removes a
+// pane while at least one remains. Canvas splits into Diagnostics; Diagnostics
+// and Settings split into Canvas. F3 adds or removes a Diagnostics pane beside
+// Canvas; if Diagnostics is the sole pane, F3 changes it to Canvas. A row of
+// panes shares available width by positive weights. Dragging a divider
 // redistributes only its adjacent pair, preserving their combined width and
 // every other pane's weight. Clicking a pane focuses it for the active border
 // and F3 target. The owner builds content from PaneDescriptor and owns
 // content-specific state, including one TiledRenderer per Canvas pane. This
-// widget owns only pane kinds, identities, focus, and relative widths; layout
-// state is runtime-only, and the widget never knows about documents or drawing.
+// widget owns pane kinds, identities, focus, and relative widths; layout state
+// is runtime-only, and the widget never knows about documents or drawing.
 // ---------------------------------------------------------------------------
 
 import 'dart:math' as math;
@@ -34,7 +35,8 @@ import 'touch_target_settings.dart';
 /// Content types currently implemented by the app's pane host.
 enum PaneKind {
   canvas('Canvas', Icons.brush_outlined),
-  diagnostics('Diagnostics', Icons.analytics_outlined);
+  diagnostics('Diagnostics', Icons.analytics_outlined),
+  settings('Settings', Icons.settings_outlined);
 
   const PaneKind(this.label, this.icon);
 
@@ -120,16 +122,17 @@ class PaneSystemState extends State<PaneSystem> {
     widget.onPaneTypeChanged(pane.id, kind);
   }
 
-  /// Inserts the opposite content kind beside [index] and divides its width.
+  /// Inserts a useful content kind beside [index] and divides its width.
   void _splitPane(int index, {PaneKind? kind}) {
     final pane = _panes[index];
     final newPane = _Pane(
       id: _nextPaneId++,
       kind:
           kind ??
-          (pane.kind == PaneKind.canvas
-              ? PaneKind.diagnostics
-              : PaneKind.canvas),
+          switch (pane.kind) {
+            PaneKind.canvas => PaneKind.diagnostics,
+            PaneKind.diagnostics || PaneKind.settings => PaneKind.canvas,
+          },
     );
     final weight = _weights[index];
     setState(() {

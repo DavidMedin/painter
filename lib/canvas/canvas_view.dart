@@ -18,6 +18,7 @@ import '../debug/canvas_debug_options.dart';
 import '../debug/tile_overlay.dart';
 import 'canvas_controller.dart';
 import '../help/contextual_help.dart';
+import '../settings/painter_settings.dart';
 import 'tile_grid.dart';
 import 'tiled_renderer.dart';
 
@@ -269,6 +270,10 @@ class _CanvasViewState extends State<CanvasView> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final themeColors =
+        theme.extension<PainterThemeColors>() ??
+        PainterThemeColors.fromColorScheme(theme.colorScheme);
     return HelpTarget(
       topic: HelpTopics.canvas,
       child: Semantics(
@@ -290,6 +295,8 @@ class _CanvasViewState extends State<CanvasView> {
               _renderer,
               MediaQuery.devicePixelRatioOf(context),
               widget.debugOptions,
+              theme.colorScheme,
+              themeColors,
             ),
             size: Size.infinite,
           ),
@@ -319,8 +326,7 @@ class _TrackpadGesture {
   double lastRotation = 0;
 }
 
-/// Paints the white canvas, the cached tiles and the active stroke.
-///
+/// Paints the themed canvas surface, cached tiles and the active stroke.
 /// Repaints whenever the controller (viewport, active stroke, document), the
 /// tile cache (a tile finished) or the debug options change; [shouldRepaint]
 /// only covers the constructor arguments changing. The actual tile drawing is
@@ -331,6 +337,8 @@ class _CanvasPainter extends CustomPainter {
     this.renderer,
     this.devicePixelRatio,
     this.debugOptions,
+    this.colorScheme,
+    this.themeColors,
   ) : super(
         repaint: Listenable.merge([controller, renderer.cache, ?debugOptions]),
       );
@@ -339,10 +347,12 @@ class _CanvasPainter extends CustomPainter {
   final TiledRenderer renderer;
   final double devicePixelRatio;
   final CanvasDebugOptions? debugOptions;
+  final ColorScheme colorScheme;
+  final PainterThemeColors themeColors;
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawColor(Colors.white, BlendMode.src);
+    canvas.drawColor(themeColors.canvasBackground, BlendMode.src);
     canvas.save();
     final center = Offset(size.width / 2, size.height / 2);
     // The canvas transform must equal CanvasController.toScreen: translate by
@@ -374,6 +384,8 @@ class _CanvasPainter extends CustomPainter {
         frame: renderer.frame,
         options: options,
         zoom: controller.zoom,
+        colorScheme: colorScheme,
+        themeColors: themeColors,
       );
     }
     canvas.restore();
@@ -384,5 +396,7 @@ class _CanvasPainter extends CustomPainter {
       oldDelegate.controller != controller ||
       oldDelegate.renderer != renderer ||
       oldDelegate.devicePixelRatio != devicePixelRatio ||
-      oldDelegate.debugOptions != debugOptions;
+      oldDelegate.debugOptions != debugOptions ||
+      oldDelegate.colorScheme != colorScheme ||
+      oldDelegate.themeColors != themeColors;
 }

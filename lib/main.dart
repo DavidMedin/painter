@@ -1,21 +1,16 @@
-// What: The app shell. `main` starts [PainterApp], which owns the one
-// CanvasController (the open document and viewport), builds the MaterialApp
-// and AppBar with Open / Save and touch-size controls, wires file operations
-// (_openDocument / _saveDocument), displays contextual help, and hosts the
-// selectable pane system with canvas and tile-cache diagnostics content.
+// What: The app shell. `main` restores settings and starts [PainterApp], which
+//   owns the canvas controller, selected document path, pane renderers, help,
+//   touch sizing, and theme settings. It builds the themed MaterialApp with Open
+//   / Save controls and selectable Canvas, Diagnostics, and Settings panes.
 //
-// Why: Something has to own the state that crosses subsystems: the canvas
-// (canvas/), the file I/O abstraction (document/), and the debug pane
-// (debug/). The canvas code has no file or dialog logic and the document/
-// code has no canvas types, so this is where the two are connected
-// (JSON text from the file service <-> CanvasDocument). Keeping that glue
-// here keeps canvas_controller.dart free of dart:io and dialogs, and
-// document_file_service.dart free of canvas types.
+// Why: This shell owns state that crosses the canvas, document, settings, and
+//   pane systems. Keeping file and settings persistence here avoids coupling
+//   the painting model to dialogs or platform preferences.
 //
-// Coupled to: canvas/canvas_controller.dart (CanvasController,
-// CanvasDocument), canvas/canvas_view.dart (CanvasView), canvas/
-// tiled_renderer.dart (TiledRenderer), debug/canvas_debug_options.dart,
-// debug/canvas_debug_pane.dart, document/document_file_service.dart.
+// Coupled to: canvas/canvas_controller.dart, canvas/canvas_view.dart,
+//   canvas/tiled_renderer.dart, debug/canvas_debug_pane.dart,
+//   document/document_file_service.dart, settings/painter_settings.dart,
+//   settings/settings_store.dart, and settings/theme_settings_pane.dart.
 //
 // ---------------------------------------------------------------------------
 // App shell overview
@@ -83,24 +78,39 @@ import 'debug/canvas_debug_options.dart';
 import 'debug/canvas_debug_pane.dart';
 import 'document/document_file_service.dart';
 import 'help/contextual_help.dart';
+import 'settings/painter_settings.dart';
+import 'settings/settings_store.dart';
+import 'settings/theme_settings_pane.dart';
 import 'ui/painter_action_button.dart';
 import 'ui/pane_system.dart';
 import 'ui/touch_target_settings.dart';
 
-void main() {
-  runApp(const PainterApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final store = SharedPreferencesPainterSettingsStore();
+  PainterSettings settings;
+  try {
+    settings = await store.load();
+  } catch (error, stackTrace) {
+    debugPrint('Could not load settings: $error\n$stackTrace');
+    settings = PainterSettings.defaults;
+  }
+  runApp(PainterApp(initialSettings: settings, persistSettings: store.save));
 }
 
 /// The root widget of the Painter app.
-///
-/// It is a StatefulWidget only so that [_PainterAppState] can own the
-/// controller, document path, and debug-pane state; see the app shell
-/// overview at the top of this file.
 class PainterApp extends StatefulWidget {
-  const PainterApp({super.key, this.fileService});
+  const PainterApp({
+    super.key,
+    this.fileService,
+    this.initialSettings = PainterSettings.defaults,
+    this.persistSettings,
+  });
 
   /// Overridable for tests; defaults to [InAppDocumentFileService].
   final DocumentFileService? fileService;
+  final PainterSettings initialSettings;
+  final Future<void> Function(PainterSettings settings)? persistSettings;
 
   @override
   State<PainterApp> createState() => _PainterAppState();
@@ -111,6 +121,7 @@ class _PainterAppState extends State<PainterApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final DocumentFileService _fileService =
       widget.fileService ?? InAppDocumentFileService();
+  late final PainterSettingsController _settings;
   String? _documentPath;
   bool _fileOperationInProgress = false;
 
@@ -121,6 +132,15 @@ class _PainterAppState extends State<PainterApp> {
       GlobalKey<PaneSystemState>();
   bool _enlargeTargets = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _settings = PainterSettingsController(
+      initial: widget.initialSettings,
+      persist: widget.persistSettings,
+    );
+  }
+
   void _toggleDebugPane() => _paneSystemKey.currentState?.toggleDiagnostics();
 
   void _onPaneRemoved(int paneId) => _renderers.remove(paneId);
@@ -129,7 +149,7 @@ class _PainterAppState extends State<PainterApp> {
     if (kind != PaneKind.canvas) _renderers.remove(paneId);
   }
 
-  /// Builds a pane from its selected kind and the renderer owned by its Canvas.
+  /// Builds a pane from its selected kind and the state its content requires.
   Widget _buildPaneContent(BuildContext context, PaneDescriptor pane) {
     return switch (pane.kind) {
       PaneKind.canvas => CanvasView(
@@ -139,6 +159,7 @@ class _PainterAppState extends State<PainterApp> {
         onRenderer: (renderer) => _renderers[pane.id] = renderer,
       ),
       PaneKind.diagnostics => _diagnosticsContent(pane),
+      PaneKind.settings => ThemeSettingsPane(controller: _settings),
     };
   }
 
@@ -166,10 +187,10 @@ class _PainterAppState extends State<PainterApp> {
     await showContextHelp(context, _helpState.activeTopic);
   }
 
-  /// Releases the objects this State created itself. The [DocumentFileService]
-  /// is not disposed: it holds no resources and may have been injected.
+  /// Releases controllers and help state created by this app State.
   @override
   void dispose() {
+    _settings.dispose();
     _debugOptions.dispose();
     _helpState.dispose();
     _controller.dispose();
@@ -284,64 +305,74 @@ class _PainterAppState extends State<PainterApp> {
     );
   }
 
-  /// Builds the app shell and pane workspace. Help, touch sizing, and shortcuts
-  /// wrap Navigator so modal routes inherit them; F1 uses its overlay context.
+  /// Builds the app shell using the currently selected light/dark palettes.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Painter',
-      navigatorKey: _navigatorKey,
-      builder: (context, child) => HelpScope(
-        helpState: _helpState,
-        child: TouchTargetSettings(
-          enlarged: _enlargeTargets,
-          child: CallbackShortcuts(
-            bindings: {
-              const SingleActivator(LogicalKeyboardKey.f1): _showContextHelp,
-              const SingleActivator(LogicalKeyboardKey.f3): _toggleDebugPane,
-            },
-            child: Focus(autofocus: true, child: child!),
-          ),
-        ),
-      ),
-      home: Builder(
-        builder: (context) => Scaffold(
-          appBar: AppBar(
-            title: const Text('Painter'),
-            actions: [
-              PainterActionButton(
-                icon: Icons.folder_open,
-                label: 'Open',
-                topic: HelpTopics.openDocument,
-                onPressed: _fileOperationInProgress
-                    ? null
-                    : () => _openDocument(context),
+    return AnimatedBuilder(
+      animation: _settings,
+      builder: (context, _) {
+        final settings = _settings.settings;
+        return MaterialApp(
+          title: 'Painter',
+          navigatorKey: _navigatorKey,
+          theme: settings.themeFor(Brightness.light).themeData,
+          darkTheme: settings.themeFor(Brightness.dark).themeData,
+          themeMode: settings.mode,
+          builder: (context, child) => HelpScope(
+            helpState: _helpState,
+            child: TouchTargetSettings(
+              enlarged: _enlargeTargets,
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.f1):
+                      _showContextHelp,
+                  const SingleActivator(LogicalKeyboardKey.f3):
+                      _toggleDebugPane,
+                },
+                child: Focus(autofocus: true, child: child!),
               ),
-              PainterActionButton(
-                icon: Icons.save,
-                label: 'Save',
-                topic: HelpTopics.saveDocument,
-                onPressed: _fileOperationInProgress
-                    ? null
-                    : () => _saveDocument(context),
-              ),
-              PainterActionButton(
-                icon: Icons.touch_app,
-                label: _enlargeTargets ? 'Touch: Large' : 'Touch: Standard',
-                topic: HelpTopics.touchTargets,
-                onPressed: () =>
-                    setState(() => _enlargeTargets = !_enlargeTargets),
-              ),
-            ],
+            ),
           ),
-          body: PaneSystem(
-            key: _paneSystemKey,
-            contentBuilder: _buildPaneContent,
-            onPaneRemoved: _onPaneRemoved,
-            onPaneTypeChanged: _onPaneTypeChanged,
+          home: Builder(
+            builder: (context) => Scaffold(
+              appBar: AppBar(
+                title: const Text('Painter'),
+                actions: [
+                  PainterActionButton(
+                    icon: Icons.folder_open,
+                    label: 'Open',
+                    topic: HelpTopics.openDocument,
+                    onPressed: _fileOperationInProgress
+                        ? null
+                        : () => _openDocument(context),
+                  ),
+                  PainterActionButton(
+                    icon: Icons.save,
+                    label: 'Save',
+                    topic: HelpTopics.saveDocument,
+                    onPressed: _fileOperationInProgress
+                        ? null
+                        : () => _saveDocument(context),
+                  ),
+                  PainterActionButton(
+                    icon: Icons.touch_app,
+                    label: _enlargeTargets ? 'Touch: Large' : 'Touch: Standard',
+                    topic: HelpTopics.touchTargets,
+                    onPressed: () =>
+                        setState(() => _enlargeTargets = !_enlargeTargets),
+                  ),
+                ],
+              ),
+              body: PaneSystem(
+                key: _paneSystemKey,
+                contentBuilder: _buildPaneContent,
+                onPaneRemoved: _onPaneRemoved,
+                onPaneTypeChanged: _onPaneTypeChanged,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

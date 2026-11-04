@@ -21,6 +21,7 @@ Use this directory for durable technical or product decisions that have actually
 - [ADR 0008 — Discoverable controls, workspaces, and touch targets](0008-discoverable-controls-workspaces-and-touch-targets.md)
 - [ADR 0009 — Commit bounded stroke chunks during long gestures](0009-bounded-active-stroke-chunks.md)
 - [ADR 0010 — Docked pane system](0010-pane-system.md)
+- [ADR 0011 — Theme settings and saved palettes](0011-theme-settings-and-saved-palettes.md)
 
 ## Record template
 

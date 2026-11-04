@@ -47,30 +47,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../help/contextual_help.dart';
+import '../settings/painter_settings.dart';
 import '../ui/painter_action_button.dart';
 import '../ui/touch_target_settings.dart';
 
-/// Colors, metrics, and the shared monospace [TextStyle] of the kit. Every
-/// widget in this file reads its look from here, so restyling the kit means
-/// editing only this class. [good], [warn], and [bad] are also used by callers
-/// for value coloring (canvas_debug_pane.dart) and by `tileDrawColor` in
-/// tile_overlay.dart.
+/// Theme-driven colors and the compact typography of the diagnostics kit.
 class ImTheme {
   const ImTheme._();
-
-  static const Color windowBg = Color(0xF0151518);
-  static const Color header = Color(0xFF2F4F80);
-  static const Color headerHover = Color(0xFF3D6CB3);
-  static const Color frameBg = Color(0xFF29292E);
-  static const Color frameHover = Color(0xFF3B5E96);
-  static const Color accent = Color(0xFF4296FA);
-  static const Color border = Color(0xFF6E6E80);
-  static const Color text = Color(0xFFF2F2F2);
-  static const Color textDim = Color(0xFF8A8A92);
-  static const Color good = Color(0xFF6BD66B);
-  static const Color warn = Color(0xFFF2C14E);
-  static const Color bad = Color(0xFFF26B5E);
-  static const Color plot = Color(0xFF9C7BE8);
 
   static const double rowHeight = 20;
   static const double padding = 6;
@@ -81,8 +64,36 @@ class ImTheme {
     'monospace',
   ];
 
-  static const TextStyle style = TextStyle(
-    color: text,
+  static Color windowBg(BuildContext context) =>
+      Theme.of(context).colorScheme.surface;
+  static Color header(BuildContext context) =>
+      Theme.of(context).colorScheme.primary;
+  static Color headerHover(BuildContext context) =>
+      Theme.of(context).colorScheme.secondary;
+  static Color frameBg(BuildContext context) =>
+      Theme.of(context).colorScheme.surfaceContainerHighest;
+  static Color frameHover(BuildContext context) =>
+      Theme.of(context).colorScheme.secondaryContainer;
+  static Color accent(BuildContext context) =>
+      Theme.of(context).colorScheme.primary;
+  static Color border(BuildContext context) =>
+      Theme.of(context).colorScheme.outline;
+  static Color text(BuildContext context) =>
+      Theme.of(context).colorScheme.onSurface;
+  static Color textDim(BuildContext context) =>
+      Theme.of(context).colorScheme.onSurfaceVariant;
+  static Color good(BuildContext context) =>
+      Theme.of(context).extension<PainterThemeColors>()?.success ??
+      Theme.of(context).colorScheme.primary;
+  static Color warn(BuildContext context) =>
+      Theme.of(context).extension<PainterThemeColors>()?.warning ??
+      Theme.of(context).colorScheme.tertiary;
+  static Color bad(BuildContext context) => Theme.of(context).colorScheme.error;
+  static Color plot(BuildContext context) =>
+      Theme.of(context).colorScheme.tertiary;
+
+  static TextStyle style(BuildContext context) => TextStyle(
+    color: text(context),
     fontSize: 12,
     height: 1.2,
     fontFamily: fontFamily,
@@ -91,7 +102,8 @@ class ImTheme {
     fontWeight: FontWeight.normal,
   );
 
-  static TextStyle get dim => style.copyWith(color: textDim);
+  static TextStyle dim(BuildContext context) =>
+      style(context).copyWith(color: textDim(context));
 }
 
 /// A collapsible `CollapsingHeader` / `TreeNode`. State survives rebuilds.
@@ -141,14 +153,16 @@ class _ImSectionState extends State<ImSection> {
                   child: Container(
                     height: TouchTargetSettings.height(context),
                     margin: const EdgeInsets.only(top: 3),
-                    color: _hover ? ImTheme.headerHover : ImTheme.header,
+                    color: _hover
+                        ? ImTheme.headerHover(context)
+                        : ImTheme.header(context),
                     padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: Row(
                       children: [
                         Icon(
                           _open ? Icons.arrow_drop_down : Icons.arrow_right,
                           size: 16,
-                          color: ImTheme.text,
+                          color: ImTheme.text(context),
                         ),
                         Expanded(
                           child: Text(
@@ -198,14 +212,14 @@ class ImValue extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                style: ImTheme.dim,
+                style: ImTheme.dim(context),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             Flexible(
               child: Text(
                 value,
-                style: ImTheme.style.copyWith(color: color),
+                style: ImTheme.style(context).copyWith(color: color),
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.end,
                 softWrap: false,
@@ -228,7 +242,7 @@ class ImText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final base = dim ? ImTheme.dim : ImTheme.style;
+    final base = dim ? ImTheme.dim(context) : ImTheme.style(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Text(
@@ -247,7 +261,7 @@ class ImSeparator extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     height: 1,
     margin: const EdgeInsets.symmetric(vertical: 4),
-    color: ImTheme.border.withValues(alpha: 0.4),
+    color: ImTheme.border(context).withValues(alpha: 0.4),
   );
 }
 
@@ -297,12 +311,14 @@ class _ImCheckboxState extends State<ImCheckbox> {
                       width: 22,
                       height: 22,
                       margin: const EdgeInsets.only(right: 8),
-                      color: _hover ? ImTheme.frameHover : ImTheme.frameBg,
+                      color: _hover
+                          ? ImTheme.frameHover(context)
+                          : ImTheme.frameBg(context),
                       child: widget.value
-                          ? const Icon(
+                          ? Icon(
                               Icons.check,
                               size: 16,
-                              color: ImTheme.accent,
+                              color: ImTheme.accent(context),
                             )
                           : null,
                     ),
@@ -345,8 +361,8 @@ class ImButton extends StatelessWidget {
       icon: icon,
       label: label,
       topic: topic,
-      background: ImTheme.header,
-      foreground: ImTheme.text,
+      background: ImTheme.header(context),
+      foreground: ImTheme.text(context),
       onPressed: onPressed,
     ),
   );
@@ -456,8 +472,8 @@ class _ImSliderIntState extends State<ImSliderInt> {
                             child: Container(
                               height: targetHeight,
                               color: _hover || _focused
-                                  ? ImTheme.frameHover
-                                  : ImTheme.frameBg,
+                                  ? ImTheme.frameHover(context)
+                                  : ImTheme.frameBg(context),
                               child: Stack(
                                 children: [
                                   Positioned(
@@ -468,8 +484,8 @@ class _ImSliderIntState extends State<ImSliderInt> {
                                         box.maxWidth *
                                         (value - widget.min) /
                                         span,
-                                    child: const ColoredBox(
-                                      color: ImTheme.header,
+                                    child: ColoredBox(
+                                      color: ImTheme.header(context),
                                     ),
                                   ),
                                   Center(child: Text('$value')),
@@ -545,16 +561,20 @@ class ImPlot extends StatelessWidget {
           children: [
             Container(
               height: height,
-              color: ImTheme.frameBg,
+              color: ImTheme.frameBg(context),
               child: CustomPaint(
-                painter: _PlotPainter(data, scaleMax ?? math.max(max, 1e-6)),
+                painter: _PlotPainter(
+                  data,
+                  scaleMax ?? math.max(max, 1e-6),
+                  ImTheme.plot(context),
+                ),
               ),
             ),
             Text(
               data.isEmpty
                   ? '$label  (no samples)'
                   : '$label  min ${f(min)}  avg ${f(avg)}  max ${f(max)}',
-              style: ImTheme.dim,
+              style: ImTheme.dim(context),
               overflow: TextOverflow.ellipsis,
             ),
           ],
@@ -569,10 +589,11 @@ class ImPlot extends StatelessWidget {
 /// Values above [top] are clamped to the top. Draws nothing for fewer than two
 /// samples, since a line needs two points.
 class _PlotPainter extends CustomPainter {
-  _PlotPainter(this.data, this.top);
+  _PlotPainter(this.data, this.top, this.color);
 
   final List<double> data;
   final double top;
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -593,7 +614,7 @@ class _PlotPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2
-        ..color = ImTheme.plot,
+        ..color = color,
     );
   }
 
@@ -628,7 +649,7 @@ class ImStackedBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 3),
         child: Container(
           height: height,
-          color: ImTheme.frameBg,
+          color: ImTheme.frameBg(context),
           child: total <= 0
               ? null
               : Row(
@@ -676,7 +697,7 @@ class ImLegend extends StatelessWidget {
             children: [
               Container(width: 8, height: 8, color: color),
               const SizedBox(width: 4),
-              Text(label, style: ImTheme.dim),
+              Text(label, style: ImTheme.dim(context)),
             ],
           ),
       ],

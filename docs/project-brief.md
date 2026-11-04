@@ -10,6 +10,12 @@ Create painting software using Flutter and Dart.
 - macOS is the current target. Linux, Windows, and Android are future targets; their rollout order is undecided.
 - The initial user is an artist.
 - On launch without a file, the app opens directly to a blank canvas ready for painting; there is no splash screen.
+- Appearance supports System, Light, and Dark modes. Light and dark palettes are
+  selected independently; Gruvbox Light and Gruvbox Dark are built in, and the
+  user can create and save custom palettes.
+- Program UI colors, including canvas paper and diagnostics, follow the active
+  palette. Canvas marks remain painting content rather than UI theme colors.
+- Appearance controls are available in selectable Settings pane content.
 
 ## First Painting Workflow (T-004)
 
@@ -62,6 +68,8 @@ Use an append-only database*: strokes, including eraser strokes, overlay existin
 - A mouse stroke changes the canvas with a pencil-speck brush using weight `1.0`; a stylus stroke changes it with a pencil-speck brush whose size responds to pressure. Pressure changes size only.
 - Mouse input can pan, zoom, and rotate the canvas.
 - Opening a file replaces the current canvas/document with the opened content. Saving and reopening a document preserves its content.
+- Theme mode follows the system or stays explicitly light/dark; separate light
+  and dark palette selections and custom palette colors survive an app restart.
 - A failed file operation shows the described popup and expandable details, is logged, and leaves the app running. A non-fatal internal error or exception is logged without terminating the app. A fatal error is logged with its stack trace and relevant information before termination.
 - Unit tests cover applicable isolated behavior. Integration tests cover interactions between modular components, including drawing a stroke and verifying the resulting canvas/document change. The finished macOS build must also demonstrate the user-visible scenarios; tests alone are insufficient.
 

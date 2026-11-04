@@ -73,15 +73,44 @@ class HelpTopics {
     title: 'Pane content selector',
     tooltip: 'Choose this pane’s content',
     description:
-        'Choose Canvas for painting or Diagnostics for tile-cache readouts. '
-        'Each pane has its own selector at the top-left.',
+        'Choose Canvas for painting, Diagnostics for tile-cache readouts, or '
+        'Settings to configure themes. Each pane has its own selector at the '
+        'top-left.',
+  );
+  static const themeMode = HelpTopic(
+    title: 'Theme mode',
+    tooltip: 'Choose light, dark, or system theme mode',
+    description:
+        'System follows the operating system appearance. Light and Dark force '
+        'the corresponding theme; each brightness has its own selected palette.',
+  );
+  static const themePalette = HelpTopic(
+    title: 'Theme palette',
+    tooltip: 'Select the palette used for this brightness',
+    description:
+        'Choose a built-in Gruvbox palette or one of your saved custom themes '
+        'for light or dark appearance.',
+  );
+  static const createTheme = HelpTopic(
+    title: 'Create theme',
+    tooltip: 'Create and save a custom color palette',
+    description:
+        'Name a new palette, edit each UI color role, and save it for this '
+        'brightness. The new theme is selected immediately.',
+  );
+  static const themeColor = HelpTopic(
+    title: 'Theme color',
+    tooltip: 'Set a six-digit hexadecimal color',
+    description:
+        'Enter an opaque RGB color as six hexadecimal digits, with or without '
+        'a leading #. The preview updates to the parsed color.',
   );
   static const splitPane = HelpTopic(
     title: 'Split pane',
     tooltip: 'Add a neighboring pane',
     description:
-        'Split this pane to add a neighboring pane. The new pane starts with '
-        'the other implemented content type; drag the divider to resize.',
+        'Split this pane to add a neighboring pane. Canvas starts Diagnostics; '
+        'Diagnostics and Settings start Canvas. Drag the divider to resize.',
   );
   static const closePane = HelpTopic(
     title: 'Close pane',

@@ -29,6 +29,7 @@ import 'package:painter/debug/canvas_debug_options.dart';
 import 'package:painter/debug/canvas_debug_pane.dart';
 import 'package:painter/debug/imgui.dart';
 import 'package:painter/debug/tile_overlay.dart';
+import 'package:painter/settings/painter_settings.dart';
 import 'package:painter/main.dart';
 
 /// The pane widget, present only while the debug pane is open.
@@ -432,10 +433,25 @@ void main() {
   });
 
   // The tint legend and the canvas both take their colors from tileDrawColor.
-  test('every tile draw class has a distinct colour and a name', () {
-    // Guards the overlay/legend pairing: two classes sharing a colour would be
-    // indistinguishable on the canvas.
-    final colors = {for (final d in TileDraw.values) d: tileDrawColor(d)};
-    expect(colors.values.toSet().length, TileDraw.values.length);
-  });
+  test(
+    'every tile draw class has a distinct color in both built-in themes',
+    () {
+      for (final palette in [
+        PainterSettings.gruvboxLight,
+        PainterSettings.gruvboxDark,
+      ]) {
+        final theme = palette.themeData;
+        final colors = theme.extension<PainterThemeColors>()!;
+        final draws = {
+          for (final draw in TileDraw.values)
+            draw: tileDrawColor(draw, theme.colorScheme, colors),
+        };
+        expect(
+          draws.values.toSet().length,
+          TileDraw.values.length,
+          reason: palette.name,
+        );
+      }
+    },
+  );
 }

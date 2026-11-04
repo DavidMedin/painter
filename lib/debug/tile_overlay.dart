@@ -1,36 +1,32 @@
 // What: The in-canvas half of the debug tools: `paintTileOverlay`, which draws
 //   tile tints, grid outlines, tile coordinates, and the visible rectangle in
-//   document space, plus `tileDrawColor` / `tileDrawName`, the single mapping
-//   from a TileDraw state (../canvas/tile_stats.dart) to a color and a name.
-// Why: The overlays must follow pan, zoom, and rotation, so they are painted
-//   by the canvas (called from ../canvas/canvas_view.dart inside the document
-//   transform) rather than by the pane widget. The color/name mapping sits
-//   here, shared by the overlay and the pane (canvas_debug_pane.dart), so the
-//   legend cannot drift from what the canvas shows. Switches come from
-//   canvas_debug_options.dart; the system overview is in
-//   canvas_debug_pane.dart.
+//   document space, plus `tileDrawColor` / `tileDrawName`, which map each
+//   TileDraw state to its theme color and display name.
+// Why: The overlays follow pan, zoom, rotation, and the selected palette. This
+//   file shares the color/name mapping with the diagnostics pane so the legend
+//   cannot drift from what the canvas shows.
 import 'dart:ui' as ui;
 
-import 'package:flutter/painting.dart';
+import 'package:flutter/material.dart';
 
 import '../canvas/tile_grid.dart';
 import '../canvas/tile_stats.dart';
+import '../settings/painter_settings.dart';
 import 'canvas_debug_options.dart';
-import 'imgui.dart';
 
-/// Colour a visible tile is tinted with when [CanvasDebugOptions.showTileState]
-/// is on. Shared with the pane's legend so the two cannot disagree: the
-/// overlay tint in [paintTileOverlay] and, in canvas_debug_pane.dart, the
-/// "Visible tiles" stacked bar and rows and the "Overlays" legend all call
-/// this one function. Lives here, not in the pane, so the canvas side does not
-/// import the pane widget.
-Color tileDrawColor(TileDraw draw) => switch (draw) {
-  TileDraw.current => ImTheme.good,
-  TileDraw.stale => ImTheme.warn,
-  TileDraw.coarser => const Color(0xFF4296FA),
-  TileDraw.finer => const Color(0xFF3BC9DB),
-  TileDraw.missing => ImTheme.bad,
-  TileDraw.blank => ImTheme.textDim,
+/// Shared theme color for each tile state, used by the canvas and diagnostics
+/// pane so the overlay and legend cannot disagree.
+Color tileDrawColor(
+  TileDraw draw,
+  ColorScheme scheme,
+  PainterThemeColors colors,
+) => switch (draw) {
+  TileDraw.current => colors.success,
+  TileDraw.stale => colors.warning,
+  TileDraw.coarser => scheme.secondary,
+  TileDraw.finer => colors.info,
+  TileDraw.missing => scheme.error,
+  TileDraw.blank => scheme.onSurfaceVariant,
 };
 
 /// Human-readable name for [draw]; used by the pane's rows, legend, and text
@@ -60,6 +56,8 @@ void paintTileOverlay(
   required TileFrameStats frame,
   required CanvasDebugOptions options,
   required double zoom,
+  required ColorScheme colorScheme,
+  required PainterThemeColors themeColors,
 }) {
   if (!options.anyOverlay) return;
   final px = 1 / zoom;
@@ -71,21 +69,31 @@ void paintTileOverlay(
     final line = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = px
-      ..color = const Color(0xCC000000);
+      ..color = colorScheme.outline.withValues(alpha: 0.8);
     // frame.draws holds exactly the visible tiles at frame.level, filled in
     // by TiledRenderer.paint, which CanvasView's painter calls just before
     // this function in the same paint.
     for (final entry in frame.draws.entries) {
       final rect = TileGrid.rectOf(entry.key);
       if (options.showTileState) {
-        fill.color = tileDrawColor(entry.value).withValues(alpha: 0.22);
+        fill.color = tileDrawColor(
+          entry.value,
+          colorScheme,
+          themeColors,
+        ).withValues(alpha: 0.22);
         canvas.drawRect(rect, fill);
       }
       if (options.showTileGrid || options.showTileState) {
         canvas.drawRect(rect, line);
       }
       if (options.showCoordinates) {
-        _label(canvas, '${entry.key.x},${entry.key.y}', rect.topLeft, px);
+        _label(
+          canvas,
+          '${entry.key.x},${entry.key.y}',
+          rect.topLeft,
+          px,
+          colorScheme.onSurface,
+        );
       }
     }
   }
@@ -98,23 +106,19 @@ void paintTileOverlay(
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = px * 2
-        ..color = ImTheme.accent,
+        ..color = colorScheme.primary,
     );
   }
 }
 
-/// Draws [text] at [at] (document space) in black, [px] document units per
-/// screen pixel, so the glyphs stay about 11 logical pixels tall at any zoom.
-/// Allocates and disposes a TextPainter on every call, i.e. once per visible
-/// tile per frame while coordinates are on.
-void _label(ui.Canvas canvas, String text, Offset at, double px) {
+/// Draws [text] at [at] (document space) in the supplied theme color. [px]
+/// document units per screen pixel keeps the glyphs about 11 logical pixels
+/// tall at any zoom. Allocates and disposes a TextPainter per visible tile.
+void _label(ui.Canvas canvas, String text, Offset at, double px, Color color) {
   final painter = TextPainter(
     text: TextSpan(
       text: text,
-      style: ImTheme.style.copyWith(
-        fontSize: 11 * px,
-        color: const Color(0xFF000000),
-      ),
+      style: TextStyle(fontSize: 11 * px, color: color),
     ),
     textDirection: TextDirection.ltr,
   )..layout();

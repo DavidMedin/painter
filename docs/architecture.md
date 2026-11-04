@@ -26,6 +26,29 @@
 - **Wiring:** `PainterApp` in `lib/main.dart` owns the current document path and in-flight file-operation state, and shows a details-expandable error dialog on failure without replacing the current document or crashing.
 - **Evidence and record:** because picking is ordinary Flutter UI, `flutter test` drives and verifies the full open/save flow headlessly, including the picker dialog itself (navigate, type a name, confirm, cancel); no native dialog, VM, or file-picker plugin dependency is required.
 
+## App settings and theming
+
+- `PainterSettings` and `PainterTheme` in `lib/settings/` define System/Light/Dark
+  mode, separate brightness-specific selections, built-in Gruvbox palettes, and
+  saved custom palettes. `PainterSettingsController` owns the live immutable
+  settings value and invokes its persistence callback after changes.
+- `SharedPreferencesPainterSettingsStore` stores the complete versioned record
+  under `painter.settings.v1`. `main.dart` loads it before `runApp`, uses defaults
+  if the record is malformed or unavailable, and supplies both brightness
+  themes plus `ThemeMode` to `MaterialApp`.
+- A `PainterTheme` maps its roles to Material 3 `ColorScheme` and
+  `PainterThemeColors`. `CanvasView` uses the extension's canvas-paper color and
+  passes the active scheme/semantic colors to tile overlays; diagnostics and
+  `lib/debug/imgui.dart` resolve colors from the same `ThemeData`. User painting
+  remains independent of UI palette changes.
+- `ThemeSettingsPane` exposes mode, independent light/dark selectors, palette
+  swatches, and custom palette creation/editing. See
+  [ADR 0011](decisions/0011-theme-settings-and-saved-palettes.md).
+- **Evidence:** headless tests cover mode updates, custom palette editing and
+  selection, serialization, malformed records, persistence, and distinct tile
+  state colors in both built-in palettes. The macOS Release build succeeds;
+  window appearance has not been visually checked.
+
 ## Docked pane system and diagnostics
 
 - **Pane layout:** `lib/ui/pane_system.dart` owns pane ids, Canvas/Diagnostics

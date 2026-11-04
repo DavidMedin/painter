@@ -1,8 +1,8 @@
 # Project Status
 
-- **Current state:** a runnable macOS Flutter app with the first painting workflow and an in-house (non-native) Open/Save document flow implemented.
+- **Current state:** a runnable macOS Flutter app with the first painting workflow, in-house Open/Save, docked panes, and persistent theme settings.
 - **In progress:** T-005, saved-document behavior. Headless automated verification is complete; a live visual confirmation of the Open/Save UI in the built Release app is outstanding.
-- **Last verified:** T-005 tests, analysis, and its earlier macOS Release build passed. The discoverable-controls/workspaces enhancement passes all 86 tests, `flutter analyze`, and a headless macOS Release build (42.5 MB). Xcode logged a missing OS version for the `Any Mac` placeholder device; the build succeeded. No GUI window was launched or visually inspected for that enhancement.
+- **Most recent verification:** T-007 passes all 94 tests, `flutter analyze`, and `flutter build macos --release` (43.2 MB). Xcode logged the missing OS version for the `Any Mac` placeholder and stale build files outside this worktree; the build succeeded. No GUI window was launched; theme appearance is not visually verified.
 - **Next action:** Have a user (or an agent with Accessibility/window-focus access restored) click through Open and Save once in the Release build to visually confirm the in-house picker dialog, then mark T-005 done.
 - **Blockers:** Live visual verification of T-005's user-visible path is blocked by this agent's Accessibility permission being revoked; see T-005 Verification below.
 
@@ -131,3 +131,10 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 - `flutter test` — passed all 87 tests on the stacked tree. Coverage includes the initial single Canvas with no Diagnostics pane, selector behavior, split/resize/close, F3 docking, real diagnostics, and drawing while Diagnostics is open.
 - Not verified: appearance in a running macOS window; no GUI window was opened, per [testing.md](testing.md).
 
+## T-007 Verification
+
+- Implemented System/Light/Dark mode, independent light/dark palette selection, Gruvbox Light and Gruvbox Dark defaults, editable custom palettes, and a selectable Settings pane. Appearance settings are saved together under `painter.settings.v1`; malformed or unavailable settings fall back to defaults. See [ADR 0011](decisions/0011-theme-settings-and-saved-palettes.md).
+- `flutter test` — passed all 94 tests, including custom palette serialization, malformed-record fallback, persistence restoration, Settings interactions, and distinct tile-state colors in both built-in themes.
+- `flutter analyze` — passed: `No issues found!`.
+- `flutter build macos --release` — passed; built `build/macos/Build/Products/Release/painter.app` (43.2 MB). Xcode logged the `Any Mac` placeholder OS-version warning and stale-file warnings for artifacts outside this worktree; they did not prevent the build.
+- No GUI window was opened or visually inspected for this change, per [testing.md](testing.md). This does not change T-005's separate visual-verification blocker.

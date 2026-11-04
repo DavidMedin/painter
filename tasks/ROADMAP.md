@@ -66,3 +66,15 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
   - Document platform-specific constraints and a recommended next target in `docs/architecture.md`.
   - Create follow-up roadmap task(s) for concrete validation work only after the rollout order is decided.
   - Do not claim support for or begin implementation on a future target in this assessment task.
+
+## T-007 — Implement theme settings and saved palettes
+
+- **Priority:** P1
+- **Status:** done
+- **Dependencies:** none
+- **Outcome:** App-wide theme mode, independent light/dark palettes, and persistent user-created themes in selectable Settings pane content.
+- **Acceptance criteria:**
+  - The app supports System, Light, and Dark modes, Gruvbox Light and Gruvbox Dark defaults, independent brightness-specific selection, and custom named palettes with editable color roles.
+  - The settings store persists mode and independent palette choices and restores them; malformed JSON falls back to defaults.
+  - Program UI, canvas background, and diagnostics colors follow the selected theme while painting remains independent.
+  - Headless tests cover selection, custom palette creation/editing, serialization, persistence, and the themed tile-state colors; `flutter analyze` and the macOS Release build pass.

@@ -70,6 +70,7 @@ import '../canvas/tile_grid.dart';
 import '../canvas/tile_stats.dart';
 import '../canvas/tiled_renderer.dart';
 import '../help/contextual_help.dart';
+import '../settings/painter_settings.dart';
 import 'canvas_debug_options.dart';
 import 'imgui.dart';
 import 'tile_overlay.dart';
@@ -187,14 +188,18 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
     final r = _reading;
     final cache = widget.renderer.cache;
     final options = widget.options;
+    final theme = Theme.of(context);
+    final themeColors =
+        theme.extension<PainterThemeColors>() ??
+        PainterThemeColors.fromColorScheme(theme.colorScheme);
     return DecoratedBox(
-      decoration: const BoxDecoration(color: ImTheme.windowBg),
+      decoration: BoxDecoration(color: ImTheme.windowBg(context)),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(ImTheme.padding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ImText('Tile cache diagnostics', color: ImTheme.text),
+            ImText('Tile cache diagnostics', color: ImTheme.text(context)),
             // Frame: TileFrameStats level, recordMillis, activeSplats, and the
             // TiledRenderer.recordHistory plot. `record time` is UI-thread time
             // spent recording draw calls, not raster or GPU time (ADR 0006).
@@ -208,7 +213,11 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 ImValue(
                   'record time',
                   '${r.frame.recordMillis.toStringAsFixed(3)} ms',
-                  color: _budget(r.frame.recordMillis),
+                  color: _budget(
+                    r.frame.recordMillis,
+                    theme.colorScheme,
+                    themeColors,
+                  ),
                 ),
                 ImValue('active chunk splats', '${r.frame.activeSplats}'),
                 ImPlot(
@@ -264,7 +273,7 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                     for (final d in TileDraw.values)
                       ImSegment(
                         r.drawCount(d).toDouble(),
-                        tileDrawColor(d),
+                        tileDrawColor(d, theme.colorScheme, themeColors),
                         tileDrawName(d),
                       ),
                   ],
@@ -273,7 +282,7 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                   ImValue(
                     tileDrawName(d),
                     '${r.drawCount(d)}',
-                    color: tileDrawColor(d),
+                    color: tileDrawColor(d, theme.colorScheme, themeColors),
                   ),
               ],
             ),
@@ -296,17 +305,17 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 ImValue(
                   'building',
                   '${r.building} / ${r.maxInFlight}',
-                  color: r.building > 0 ? ImTheme.warn : null,
+                  color: r.building > 0 ? ImTheme.warn(context) : null,
                 ),
                 ImValue(
                   'queued',
                   '${r.queued}',
-                  color: r.queued > 0 ? ImTheme.warn : null,
+                  color: r.queued > 0 ? ImTheme.warn(context) : null,
                 ),
                 ImValue(
                   'idle',
                   r.idle ? 'yes' : 'no',
-                  color: r.idle ? ImTheme.good : ImTheme.warn,
+                  color: r.idle ? ImTheme.good(context) : ImTheme.warn(context),
                 ),
                 ImSeparator(),
                 ImValue('requests', '${r.counters.requests}'),
@@ -356,7 +365,10 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 if (options.showTileState)
                   ImLegend([
                     for (final d in TileDraw.values)
-                      (tileDrawColor(d), tileDrawName(d)),
+                      (
+                        tileDrawColor(d, theme.colorScheme, themeColors),
+                        tileDrawName(d),
+                      ),
                   ]),
                 ImCheckbox(
                   label: 'tile grid',
@@ -425,7 +437,8 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                   topic: HelpTopics.copyReport,
                   onPressed: _copyReport,
                 ),
-                if (_notice != null) ImText(_notice!, color: ImTheme.good),
+                if (_notice != null)
+                  ImText(_notice!, color: ImTheme.good(context)),
               ],
             ),
           ],
@@ -437,10 +450,14 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
   /// Color for the frame record time: red above 8 ms, yellow above 2 ms,
   /// default otherwise. The thresholds are fixed constants in this method;
   /// the repo does not say how they were chosen.
-  Color? _budget(double ms) => ms > 8
-      ? ImTheme.bad
+  Color? _budget(
+    double ms,
+    ColorScheme scheme,
+    PainterThemeColors themeColors,
+  ) => ms > 8
+      ? scheme.error
       : ms > 2
-      ? ImTheme.warn
+      ? themeColors.warning
       : null;
 }
 
