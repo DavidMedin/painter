@@ -76,5 +76,8 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
 - **Acceptance criteria:**
   - The app supports System, Light, and Dark modes, Gruvbox Light and Gruvbox Dark defaults, independent brightness-specific selection, and custom named palettes with editable color roles.
   - The settings store persists mode and independent palette choices and restores them; malformed JSON falls back to defaults.
-  - Program UI, canvas background, and diagnostics colors follow the selected theme while painting remains independent.
+  - Program UI and diagnostics colors follow the selected theme while painting
+    remains independent. The canvas-paper portion of the original requirement
+    was superseded by [ADR 0012](../docs/decisions/0012-pane-viewports-and-fixed-canvas-paper.md); the paper
+    is now fixed white.
   - Headless tests cover selection, custom palette creation/editing, serialization, persistence, and the themed tile-state colors; `flutter analyze` and the macOS Release build pass.

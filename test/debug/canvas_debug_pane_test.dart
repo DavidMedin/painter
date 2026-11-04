@@ -32,12 +32,15 @@ import 'package:painter/debug/tile_overlay.dart';
 import 'package:painter/settings/painter_settings.dart';
 import 'package:painter/main.dart';
 
-/// The diagnostics widget present while any Pane Mode selects Diagnostics.
+/// The pane widget, present only while the debug pane is open.
 Finder get _pane => find.byType(CanvasDebugPane);
 
-/// The TiledRenderer currently supplying the pane's live diagnostics.
-TiledRenderer _rendererOf(WidgetTester tester) =>
-    tester.widget<CanvasDebugPane>(_pane).renderer;
+/// The TiledRenderer the pane is reading.
+TiledRenderer _rendererOf(WidgetTester tester) {
+  // The renderer is private to the view; reach it through the callback the app
+  // installed by finding the pane after opening it.
+  return tester.widget<CanvasDebugPane>(_pane).renderer;
+}
 
 /// The value shown in the [ImValue] row labelled [label].
 String _row(WidgetTester tester, String label) {
@@ -64,16 +67,6 @@ Future<void> _drawStroke(WidgetTester tester) async {
   );
   await tester.sendEventToBinding(mouse.up());
   await tester.pump();
-}
-
-Future<void> _rightClickAt(WidgetTester tester, Offset position) async {
-  final gesture = await tester.startGesture(
-    position,
-    kind: PointerDeviceKind.mouse,
-    buttons: kSecondaryMouseButton,
-  );
-  await gesture.up();
-  await tester.pumpAndSettle();
 }
 
 /// Lets background tile builds finish; real async work needs real time.
@@ -104,58 +97,31 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
-  testWidgets('Pane Mode diagnostics work alone and F3 toggles a neighbor', (
-    tester,
-  ) async {
+  // The app starts with one Canvas. F3 turns a sole Diagnostics pane back
+  // into Canvas; otherwise it adds or removes a docked neighbor.
+  testWidgets('pane selector and F3 toggle docked diagnostics', (tester) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.tap(find.byKey(const ValueKey('pane-mode-0')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Diagnostics').last);
-    await tester.pumpAndSettle();
 
-    expect(_pane, findsOneWidget);
-    expect(find.text('Document and splats'), findsOneWidget);
-    expect(find.byType(CanvasView), findsNothing);
-    final renderer = _rendererOf(tester);
-    expect(renderer.cache.maxTiles, 256);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pumpAndSettle();
-    expect(_pane, findsNothing);
-    final view = tester.widget<CanvasView>(find.byType(CanvasView));
-    expect(view.renderer, same(renderer));
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pumpAndSettle();
-    expect(_pane, findsOneWidget);
-    expect(find.byType(CanvasView), findsOneWidget);
-    expect(_rendererOf(tester), same(renderer));
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pumpAndSettle();
-    expect(_pane, findsNothing);
-  });
-  testWidgets('Diagnostics binds to a Canvas added after it', (tester) async {
-    await tester.pumpWidget(const PainterApp());
-    await tester.tap(find.byKey(const ValueKey('pane-mode-0')));
+    await tester.tap(find.text('Canvas').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Diagnostics').last);
     await tester.pumpAndSettle();
     expect(_pane, findsOneWidget);
     expect(find.byType(CanvasView), findsNothing);
 
-    await _rightClickAt(
-      tester,
-      tester.getCenter(find.byKey(const ValueKey('pane-boundary-1'))),
-    );
-    await tester.tap(find.text('Add pane to the right'));
-    await tester.pumpAndSettle();
-
+    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
+    await tester.pump();
+    expect(_pane, findsNothing);
     expect(find.byType(CanvasView), findsOneWidget);
-    expect(
-      _rendererOf(tester),
-      same(tester.widget<CanvasView>(find.byType(CanvasView)).renderer),
-    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
+    await tester.pump();
+    expect(_pane, findsOneWidget);
+    expect(find.byType(CanvasView), findsOneWidget);
+
+    await tester.tap(find.text('Close').last);
+    await tester.pump();
+    expect(_pane, findsNothing);
   });
 
   testWidgets('touch setting enlarges diagnostics controls', (tester) async {
@@ -173,29 +139,29 @@ void main() {
     expect(tester.getSize(checkbox).height, 56);
   });
 
-  testWidgets('drawing remains intact with diagnostics and additional panes', (
-    tester,
-  ) async {
-    await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pumpAndSettle();
-    final controller = tester
-        .widget<CanvasView>(find.byType(CanvasView))
-        .controller;
+  testWidgets(
+    'drawing still works with docked diagnostics and split controls',
+    (tester) async {
+      await tester.pumpWidget(const PainterApp());
+      await tester.sendKeyEvent(LogicalKeyboardKey.f3);
+      await tester.pump();
+      final controller = tester
+          .widget<CanvasView>(find.byType(CanvasView))
+          .controller;
 
-    await _drawStroke(tester);
-    expect(controller.document.strokeCount, 1);
+      await _drawStroke(tester);
+      expect(controller.document.strokeCount, 1);
 
-    await _rightClickAt(
-      tester,
-      tester.getCenter(find.byKey(const ValueKey('pane-boundary-1'))),
-    );
-    await tester.tap(find.text('Add pane between panes'));
-    await tester.pumpAndSettle();
-    expect(_pane, findsOneWidget);
-    expect(find.byType(CanvasView), findsNWidgets(2));
-    expect(controller.document.strokeCount, 1);
-  });
+      await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Side by side'));
+      await tester.pumpAndSettle();
+      expect(_pane, findsNWidgets(2));
+      expect(find.byType(CanvasView), findsOneWidget);
+      await _drawStroke(tester);
+      expect(controller.document.strokeCount, 2);
+    },
+  );
 
   // The 'Document and splats' section starts closed (initiallyOpen: false), so
   // the test opens it first. The 300 ms pump lets the pane's 250 ms refresh
@@ -255,7 +221,7 @@ void main() {
     // Real changes: a stroke, new tiles, a viewport move, and more frames.
     await _drawStroke(tester);
     await _letTilesLand(tester);
-    view.controller.panBy(const Offset(7, 3));
+    view.viewport.panBy(const Offset(7, 3));
     await tester.pump(const Duration(milliseconds: 600));
     expect(texts(), before, reason: 'frozen while paused');
 
@@ -349,22 +315,22 @@ void main() {
     await tester.pumpWidget(const PainterApp());
     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
     await tester.pump();
-    final controller = tester
+    final viewport = tester
         .widget<CanvasView>(find.byType(CanvasView))
-        .controller;
-    controller
+        .viewport;
+    viewport
       ..panBy(const Offset(40, 10))
       ..zoomAt(Offset.zero, const Size(100, 100), 2)
       ..rotateAt(Offset.zero, const Size(100, 100), 0.5);
-    expect(controller.zoom, 2);
+    expect(viewport.zoom, 2);
 
     final button = find.text('Reset view');
     await tester.ensureVisible(button);
     await tester.tap(button);
     await tester.pump();
-    expect(controller.pan, Offset.zero);
-    expect(controller.zoom, 1);
-    expect(controller.rotation, 0);
+    expect(viewport.pan, Offset.zero);
+    expect(viewport.zoom, 1);
+    expect(viewport.rotation, 0);
   });
 
   testWidgets('overlay checkboxes flip the options the canvas reads', (

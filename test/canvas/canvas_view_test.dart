@@ -1,17 +1,16 @@
-// What: Widget tests that feed synthetic pointer events straight into
-//   CanvasView and assert on CanvasController state: mouse drawing and fixed
-//   weight, bounded chunks during a long mouse gesture, stylus pressure, and
-//   mouse pan/zoom/rotation.
+// What: Widget tests drive synthetic pointer input through CanvasView and
+//   verify shared document updates, pane-local viewport state, and white paper.
 // Why: T-003 acceptance covers canvas controls (ADR 0001); ADR 0009 adds the
-//   requirement that long gestures commit bounded chunks as they continue.
-//   These tests assert document and viewport state, not physical stylus input
-//   or raster output; stylus events are synthetic.
-// Covers: lib/canvas/canvas_view.dart (CanvasView input handling, _weightFor)
-//   and lib/canvas/canvas_controller.dart (active chunks, CanvasDocument, and
-//   viewport transforms). Trackpad gestures (ADR 0003) are not tested here.
+//   bounded-chunk requirement, and pane behavior needs independent transforms.
+//   Mouse/stylus events are synthetic; dark-theme paper is checked as pixels.
+// Covers: lib/canvas/canvas_view.dart (CanvasView input and painting) and
+//   lib/canvas/canvas_controller.dart (document, active chunks, viewports).
+
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_controller.dart';
 import 'package:painter/canvas/canvas_view.dart';
@@ -128,6 +127,9 @@ void main() {
   // CanvasView.
   testWidgets('mouse buttons pan and rotate, and wheel zooms', (tester) async {
     final controller = await _pumpCanvas(tester);
+    final viewport = tester
+        .widget<CanvasView>(find.byType(CanvasView))
+        .viewport;
     final initialSize = tester.getSize(find.byType(CanvasView));
     final start = Offset(initialSize.width / 2, initialSize.height / 2);
 
@@ -142,10 +144,10 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(panMouse.up());
-    expect(controller.pan, const Offset(12, 7));
+    expect(viewport.pan, const Offset(12, 7));
 
     final zoomAnchor = start + const Offset(60, -40);
-    final documentAnchor = controller.toDocument(zoomAnchor, initialSize);
+    final documentAnchor = viewport.toDocument(zoomAnchor, initialSize);
     await tester.sendEventToBinding(
       PointerScrollEvent(
         position: zoomAnchor,
@@ -153,8 +155,8 @@ void main() {
         scrollDelta: const Offset(0, -100),
       ),
     );
-    expect(controller.zoom, greaterThan(1));
-    final zoomedAnchor = controller.toScreen(documentAnchor, initialSize);
+    expect(viewport.zoom, greaterThan(1));
+    final zoomedAnchor = viewport.toScreen(documentAnchor, initialSize);
     expect(zoomedAnchor.dx, closeTo(zoomAnchor.dx, 0.001));
     expect(zoomedAnchor.dy, closeTo(zoomAnchor.dy, 0.001));
 
@@ -169,8 +171,105 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(rotateMouse.up());
-    expect(controller.rotation, closeTo(0.5, 0.001));
+    expect(viewport.rotation, closeTo(0.5, 0.001));
     controller.dispose();
+  });
+  testWidgets('Canvas panes share content but keep independent viewports', (
+    tester,
+  ) async {
+    final controller = CanvasController();
+    final firstViewport = CanvasViewportController();
+    final secondViewport = CanvasViewportController();
+    addTearDown(controller.dispose);
+    addTearDown(firstViewport.dispose);
+    addTearDown(secondViewport.dispose);
+    controller
+      ..beginStroke(const Offset(10, 20), 1)
+      ..endStroke();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Row(
+            children: [
+              Expanded(
+                child: CanvasView(
+                  controller: controller,
+                  viewport: firstViewport,
+                ),
+              ),
+              Expanded(
+                child: CanvasView(
+                  controller: controller,
+                  viewport: secondViewport,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final first = find.byType(CanvasView).first;
+    final start = tester.getRect(first).center;
+    final mouse = TestPointer(10, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      mouse.down(start, buttons: kSecondaryMouseButton),
+    );
+    await tester.sendEventToBinding(
+      mouse.move(start + const Offset(18, 9), buttons: kSecondaryMouseButton),
+    );
+    await tester.sendEventToBinding(mouse.up());
+    expect(firstViewport.pan, const Offset(18, 9));
+
+    final size = tester.getSize(first);
+    final center = Offset(size.width / 2, size.height / 2);
+    firstViewport
+      ..zoomAt(center, size, 2)
+      ..rotateAt(center, size, 0.25);
+
+    expect(firstViewport.zoom, 2);
+    expect(firstViewport.rotation, 0.25);
+    expect(controller.document.strokeCount, 1);
+    expect(firstViewport.pan, isNot(secondViewport.pan));
+    expect(secondViewport.pan, Offset.zero);
+    expect(secondViewport.zoom, 1);
+    expect(secondViewport.rotation, 0);
+  });
+
+  testWidgets('canvas paper stays white in a dark app theme', (tester) async {
+    final controller = CanvasController();
+    final viewport = CanvasViewportController();
+    addTearDown(controller.dispose);
+    addTearDown(viewport.dispose);
+    final boundaryKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(),
+        home: Scaffold(
+          body: RepaintBoundary(
+            key: boundaryKey,
+            child: CanvasView(controller: controller, viewport: viewport),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final boundary =
+        boundaryKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    final image = (await tester.runAsync(() => boundary.toImage()))!;
+    final data = (await tester.runAsync(
+      () => image.toByteData(format: ui.ImageByteFormat.rawRgba),
+    ))!;
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+    final pixel = ((image.height ~/ 2) * image.width + image.width ~/ 2) * 4;
+
+    expect(bytes.sublist(pixel, pixel + 4), [255, 255, 255, 255]);
+    image.dispose();
   });
 }
 
@@ -179,9 +278,13 @@ void main() {
 /// window origin and local coordinates equal global ones.
 Future<CanvasController> _pumpCanvas(WidgetTester tester) async {
   final controller = CanvasController();
+  final viewport = CanvasViewportController();
+  addTearDown(viewport.dispose);
   await tester.pumpWidget(
     MaterialApp(
-      home: Scaffold(body: CanvasView(controller: controller)),
+      home: Scaffold(
+        body: CanvasView(controller: controller, viewport: viewport),
+      ),
     ),
   );
   return controller;

@@ -1,10 +1,15 @@
 # Project Status
 
-- **Current state:** a runnable macOS Flutter app with the first painting workflow, in-house Open/Save, docked panes, and persistent theme settings.
-- **In progress:** T-005, saved-document behavior. Headless automated verification is complete; a live visual confirmation of the Open/Save UI in the built Release app is outstanding.
-- **Most recent verification:** T-007 passes all 94 tests, `flutter analyze`, and `flutter build macos --release` (43.2 MB). Xcode logged the missing OS version for the `Any Mac` placeholder and stale build files outside this worktree; the build succeeded. No GUI window was launched; theme appearance is not visually verified.
-- **Next action:** Have a user (or an agent with Accessibility/window-focus access restored) click through Open and Save once in the Release build to visually confirm the in-house picker dialog, then mark T-005 done.
-- **Blockers:** Live visual verification of T-005's user-visible path is blocked by this agent's Accessibility permission being revoked; see T-005 Verification below.
+- **Current state:** a runnable macOS Flutter app with the first painting workflow, in-house Open/Save, selectable split panes, shared-document Canvas views, and persistent theme settings.
+- **In progress:** T-005, saved-document behavior. Headless automated verification is complete; live visual confirmation of Open/Save and pane/viewport behavior in the built Release app remains outstanding.
+- **Most recent verification:** on the merged feature tree, `flutter test` passed
+  all 99 tests; `flutter analyze` reported `No issues found!`; and
+  `flutter test test/widget_test.dart` passed both headless app tests. No
+  Release build or GUI was run after stacking.
+- **Next action:** Build the merged tree, then visually exercise Open/Save,
+  pane selection, both split orientations, resizing, and independent Canvas
+  views in the Release app before marking T-005 done.
+- **Blockers:** Live visual verification remains outstanding; no GUI window was opened or foregrounded during this work. See T-005 Verification below.
 
 ## T-002 Verification
 
@@ -37,7 +42,7 @@
 ## T-005 Verification
 
 - `flutter pub get` — succeeded; no new dependency was added (the in-house picker uses only `dart:io` and Flutter widgets, no `file_selector` or other file-picker plugin).
-- `flutter test test/document/document_file_workflow_test.dart` — passed both lifecycle tests: first save, repeated save to the associated path, open/replacement round-trip of stroke coordinates and weights with a viewport reset, and open/save failures showing the expandable-details error dialog while preserving the current document.
+- `flutter test test/document/document_file_workflow_test.dart` — passed both lifecycle tests: first/repeated save, shared saved strokes across two Canvas panes, open/replacement round-trip that resets both viewport transforms, and open/save failure dialogs preserving the current document.
 - `flutter test test/document/file_picker_dialog_test.dart` — passed all five tests of the in-house `InAppFilePicker` dialog itself: listing directories and `.paint` files while hiding other extensions, confirming an open by tapping a file, navigating into a subdirectory, typing a name and confirming a save (appending `.paint`), and cancel returning `null`. This is the part that replaces the native file dialog and is exactly what could not be driven headlessly before.
 - `flutter test` — passed all 12 tests, including the pre-existing canvas/widget tests, after fixing `test/canvas/painting_workflow_test.dart` to compute pointer positions relative to the canvas's actual on-screen offset (previously assumed the canvas started at the window origin, which broke once the Open/Save `AppBar` was added above it).
 - `flutter analyze` — passed: `No issues found!`.
@@ -49,7 +54,7 @@
 - Direct user request: expand `CanvasView`'s canvas controls to support macOS trackpad two-finger pan, pinch zoom, and two-finger rotate, in addition to the existing T-003/T-004 mouse controls. See [ADR 0003](decisions/0003-trackpad-gesture-controls.md).
 - `flutter analyze` — passed: `No issues found!`.
 - `flutter test` — passed all 12 pre-existing tests unchanged.
-- A throwaway widget test drove `TestPointer.panZoomStart/panZoomUpdate/panZoomEnd` (synthetic `PointerDeviceKind.trackpad` events) through `CanvasView` with incremental pan, then pinch (`scale: 1.5`), then rotate (`rotation: 0.3`); asserted and printed `CanvasController.pan`, `.zoom`, and `.rotation` all changed as expected (`pan=Offset(50.7, 39.2) zoom=1.5 rotation=0.3`), then was deleted.
+- A throwaway widget test drove `TestPointer.panZoomStart/panZoomUpdate/panZoomEnd` (synthetic `PointerDeviceKind.trackpad` events) through `CanvasView` with incremental pan, then pinch (`scale: 1.5`), then rotate (`rotation: 0.3`); asserted and printed `CanvasViewportController.pan`, `.zoom`, and `.rotation` all changed as expected (`pan=Offset(50.7, 39.2) zoom=1.5 rotation=0.3`), then was deleted.
 - `flutter build macos` — passed; built `build/macos/Build/Products/Release/painter.app` (42.0 MB).
 - Not verified: physical trackpad hardware behavior and whether the OS-reported rotation sign feels natural to an artist; only Flutter-side synthetic pan/zoom/rotate events were exercised.
 
@@ -124,22 +129,19 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 - `flutter test` — passed all 91 tests. The rollover regression compares one trail pixel before chunk commit, while its tile is stale, and after the replacement image lands; it confirmed the trail remains unchanged at all three stages. The regression was observed failing before the continuity overlay fix.
 - Not verified: drawing in the running macOS window, physical stylus behavior, or hardware latency; verification used synthetic Flutter input and offscreen rendering.
 
-## Docked Pane System Verification (out-of-roadmap UI enhancement)
+## Initial Pane System Verification (superseded by binary split tree)
 
-- Direct request: redesign the horizontal workspace with rounded pane frames,
-  resize handles, boundary context menus, per-pane Pane Mode selectors, a
-  zero-pane empty state, and working Diagnostics content. See [ADR 0010](decisions/0010-pane-system.md); roadmap task T-005 remains unchanged.
-- `dart format` — completed for the seven changed Dart files.
-- `flutter test` — passed all 89 tests. Pane regressions cover selector and
-  border contrast, boundary insertion/deletion, resize, deleting to zero and
-  reopening Canvas, Diagnostics without a visible Canvas, renderer retention,
-  and drawing with added panes.
-- `flutter analyze` — passed: `No issues found!`.
+- The first pane-system revision used boundary insertion/deletion and allowed
+  an empty workspace; the binary split tree in
+  [ADR 0010](decisions/0010-pane-system.md) replaced it. Roadmap task T-005
+  remains unchanged.
+- `flutter analyze` — passed on the initial revision: `No issues found!`.
 - A temporary headless smoke run mounted the real `PainterApp`, switched
   Diagnostics ↔ Canvas while retaining the renderer, deleted the last pane,
   and reopened Canvas; it passed and the temporary test was removed.
-- No macOS GUI window was opened, as required by [testing.md](testing.md);
-  native visual appearance remains unverified.
+- No macOS GUI window was opened for that earlier revision; native visual
+  appearance remained unverified.
+
 
 ## T-007 Verification
 
@@ -155,13 +157,22 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 
 ## Settings Palette Dropdown Overflow Fix
 
-- Palette selectors now expand within their available width and truncate long
-  custom theme names with an ellipsis instead of overflowing the selector.
-- The narrow-pane regression failed before the fix: its selected custom-theme
-  label measured 1065.9 logical pixels against a 55-pixel selector. It passes
-  with the expanded selector and checks that the label fits and layout reports
-  no rendering exception.
-- `flutter test` — passed all 98 tests on the stacked tree.
-- `flutter analyze` — passed: `No issues found!`.
-- No GUI window was opened; the changed settings layout was verified headlessly,
-  per [testing.md](testing.md).
+- Palette selectors expand within their available width and truncate long custom theme names instead of overflowing.
+- The narrow-pane regression failed before the fix: its selected custom-theme label measured 1065.9 logical pixels against a 55-pixel selector. It checks that the label fits and layout reports no rendering exception.
+- `flutter test` passed all 98 tests on the stacked owner tree; `flutter analyze` reported no issues.
+- No GUI window was opened; the settings layout was verified headlessly, per [testing.md](testing.md).
+
+## Canvas Pane Viewports and Fixed Paper Verification (out-of-roadmap UI enhancement)
+
+- Implemented side-by-side and top-and-bottom binary splits with draggable dividers, shared document state with independent per-Canvas pan/zoom/rotation, and fixed white canvas paper. Legacy `canvasBackground` palette keys remain loadable and are omitted from new palettes. See [ADR 0012](decisions/0012-pane-viewports-and-fixed-canvas-paper.md).
+- Before stacking, `flutter test` passed all 96 tests. Coverage included both
+  split axes, resizing and close, mode selection, shared Canvas documents with
+  independent viewports, dark-theme white-paper pixels, legacy palette
+  compatibility, and the app-level two-Canvas save/open workflow resetting
+  both viewport transforms.
+- Before stacking, `flutter analyze` reported no issues, `flutter test test/widget_test.dart` passed both headless app smoke tests, and `flutter build macos --release` succeeded with a 43.3 MB app. Xcode logged an arm64-only configuration suggestion, the `Any Mac` placeholder OS-version warning, and stale-file warnings for artifacts under `/Users/medindj1/small-projects/painter/build/` outside this worktree.
+- After stacking on the Settings palette overflow fix, `flutter test` passed
+  all 99 tests; `flutter analyze` reported `No issues found!`; and
+  `flutter test test/widget_test.dart` passed both app-shell tests. The
+  post-stack Release build was not run.
+- No GUI window was opened or visually inspected. Live appearance of the pane controls, viewport interactions, and fixed paper remains unverified; T-005 stays in progress.

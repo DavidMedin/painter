@@ -7,22 +7,21 @@
 // ---------------------------------------------------------------------------
 // Theme system overview
 //
-// PainterTheme stores the user-editable color roles and brightness for one
-// named palette. Its ThemeData maps those roles into Material 3's ColorScheme;
-// PainterThemeColors carries canvas paper and diagnostic status colors that
-// Material does not define. Gruvbox Light and Gruvbox Dark are built-in and
-// cannot be overwritten. PainterSettings stores system/light/dark mode, the
-// selected palette ID for each brightness, and saved custom palettes. Settings
-// are serialized by settings_store.dart, while PainterSettingsController
-// notifies the app shell and invokes its injected persistence callback.
+// PainterTheme stores user-editable application color roles and brightness for
+// one named palette. Its ThemeData maps those roles into Material 3's ColorScheme;
+// PainterThemeColors carries diagnostic status colors that Material does not
+// define. Canvas paper is fixed by CanvasView and independent from app theme.
+// Gruvbox Light and Gruvbox Dark are built-in and cannot be overwritten.
+// PainterSettings stores system/light/dark mode, selected palette IDs, and saved
+// custom palettes. Settings are serialized by settings_store.dart, while
+// PainterSettingsController notifies the app shell and invokes its persistence
+// callback.
 //
-// The app shell supplies the two selected ThemeData values to MaterialApp and
-// lets Flutter resolve system brightness. The settings pane edits the same
-// immutable settings object; custom color input is saved before its ID becomes
-// the selected palette. CanvasView reads PainterThemeColors and passes them to
-// its CustomPainter so the paper and diagnostic overlays follow theme changes
-// without changing user-authored strokes. All non-paint UI colors come from
-// ColorScheme or PainterThemeColors; the pencil's ink remains painting data.
+// The app shell supplies the two selected ThemeData values to MaterialApp and lets
+// Flutter resolve system brightness. The settings pane edits the same immutable
+// settings object; custom color input is saved before its ID becomes selected.
+// Canvas paper stays white when app theme changes; diagnostic overlays use
+// PainterThemeColors and non-paint UI uses ColorScheme.
 // ---------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
@@ -45,7 +44,6 @@ class PainterTheme {
     required this.outline,
     required this.error,
     required this.onError,
-    required this.canvasBackground,
     required this.success,
     required this.warning,
     required this.info,
@@ -65,7 +63,6 @@ class PainterTheme {
   final int outline;
   final int error;
   final int onError;
-  final int canvasBackground;
   final int success;
   final int warning;
   final int info;
@@ -108,7 +105,6 @@ class PainterTheme {
       dividerColor: outlineColor,
       extensions: [
         PainterThemeColors(
-          canvasBackground: Color(canvasBackground),
           success: Color(success),
           warning: Color(warning),
           info: infoColor,
@@ -146,7 +142,6 @@ class PainterTheme {
     int? outline,
     int? error,
     int? onError,
-    int? canvasBackground,
     int? success,
     int? warning,
     int? info,
@@ -165,7 +160,6 @@ class PainterTheme {
     outline: outline ?? this.outline,
     error: error ?? this.error,
     onError: onError ?? this.onError,
-    canvasBackground: canvasBackground ?? this.canvasBackground,
     success: success ?? this.success,
     warning: warning ?? this.warning,
     info: info ?? this.info,
@@ -187,7 +181,6 @@ class PainterTheme {
     'outline': outline,
     'error': error,
     'onError': onError,
-    'canvasBackground': canvasBackground,
     'success': success,
     'warning': warning,
     'info': info,
@@ -233,7 +226,6 @@ class PainterTheme {
       outline: color('outline'),
       error: color('error'),
       onError: color('onError'),
-      canvasBackground: color('canvasBackground'),
       success: color('success'),
       warning: color('warning'),
       info: color('info'),
@@ -241,11 +233,10 @@ class PainterTheme {
   }
 }
 
-/// Painter-specific colors that Material's [ColorScheme] does not define.
+/// Painter-specific status colors that Material's [ColorScheme] does not define.
 @immutable
 class PainterThemeColors extends ThemeExtension<PainterThemeColors> {
   const PainterThemeColors({
-    required this.canvasBackground,
     required this.success,
     required this.warning,
     required this.info,
@@ -254,29 +245,22 @@ class PainterThemeColors extends ThemeExtension<PainterThemeColors> {
   /// Provides semantic colors for embedders using a plain Material ColorScheme.
   static PainterThemeColors fromColorScheme(ColorScheme scheme) =>
       PainterThemeColors(
-        canvasBackground: scheme.surface,
         success: scheme.primary,
         warning: scheme.tertiary,
         info: scheme.secondary,
       );
 
-  final Color canvasBackground;
   final Color success;
   final Color warning;
   final Color info;
 
   @override
-  PainterThemeColors copyWith({
-    Color? canvasBackground,
-    Color? success,
-    Color? warning,
-    Color? info,
-  }) => PainterThemeColors(
-    canvasBackground: canvasBackground ?? this.canvasBackground,
-    success: success ?? this.success,
-    warning: warning ?? this.warning,
-    info: info ?? this.info,
-  );
+  PainterThemeColors copyWith({Color? success, Color? warning, Color? info}) =>
+      PainterThemeColors(
+        success: success ?? this.success,
+        warning: warning ?? this.warning,
+        info: info ?? this.info,
+      );
 
   @override
   PainterThemeColors lerp(
@@ -285,11 +269,6 @@ class PainterThemeColors extends ThemeExtension<PainterThemeColors> {
   ) {
     if (other is! PainterThemeColors) return this;
     return PainterThemeColors(
-      canvasBackground: Color.lerp(
-        canvasBackground,
-        other.canvasBackground,
-        t,
-      )!,
       success: Color.lerp(success, other.success, t)!,
       warning: Color.lerp(warning, other.warning, t)!,
       info: Color.lerp(info, other.info, t)!,
@@ -322,7 +301,6 @@ class PainterSettings {
     outline: 0xFFA89984,
     error: 0xFF9D0006,
     onError: 0xFFFBF1C7,
-    canvasBackground: 0xFFFBF1C7,
     success: 0xFF79740E,
     warning: 0xFFB57614,
     info: 0xFF458588,
@@ -343,7 +321,6 @@ class PainterSettings {
     outline: 0xFF665C54,
     error: 0xFFFB4934,
     onError: 0xFF282828,
-    canvasBackground: 0xFF282828,
     success: 0xFFB8BB26,
     warning: 0xFFFABD2F,
     info: 0xFF83A598,

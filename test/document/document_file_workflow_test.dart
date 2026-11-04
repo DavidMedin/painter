@@ -1,13 +1,10 @@
-// What: Widget tests of the Open/Save lifecycle through the real PainterApp:
-//   first save, repeated save to the same path, open replacing the current
-//   document and resetting the viewport (stroke points and weights compared),
-//   and open/save failures showing the expandable-details error dialog while
-//   the current document is kept.
-// Why: Verifies the T-005 requirements in docs/project-brief.md ("Document and
-//   File Lifecycle", "Errors") and the decisions of ADR 0002: save then reopen
-//   preserves content, Save writes to the associated path after the first
-//   successful save, opening resets the viewport, and a failed file operation
-//   neither replaces the document nor terminates the app.
+// What: Widget tests drive Open/Save through the real PainterApp, draw through
+//   both Canvas panes into one document, reopen it to replace content and
+//   reset both viewports, and verify that file failures preserve the document.
+// Why: T-005 requires document round-tripping and observable file-operation
+//   failures (docs/project-brief.md). ADR 0002 specifies associated-path saves;
+//   opening resets every Canvas viewport and failed operations leave the app
+//   running without replacing the current document.
 // Covers: lib/main.dart (PainterApp, _openDocument, _saveDocument,
 //   _showFileOperationError), lib/document/document_file_service.dart
 //   (DocumentFileService, subclassed here), CanvasController /
@@ -38,7 +35,7 @@ import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart'
-    show AlertDialog, BuildContext, SelectableText;
+    show AlertDialog, BuildContext, SelectableText, ValueKey;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
@@ -59,14 +56,10 @@ void main() {
   tearDown(() {
     temporaryDirectory.deleteSync(recursive: true);
   });
-
-  // Pins ADR 0002's "after the first successful save, Save writes to that
-  // associated path": two Save taps must ask for a path once
-  // (savePathRequests == 1 at the end). The later stroke, pan and zoom before
-  // Open are discarded by Open: the document returns to the two saved strokes
-  // and the viewport returns to pan zero / zoom 1 (replaceDocument resets it).
+  // Confirms the associated save path is reused, and opening the saved file
+  // discards a later stroke and resets both Canvas viewport transforms.
   testWidgets(
-    'save and reopen preserves strokes and replaces current content',
+    'both Canvas panes share saved content and reset their views on open',
     (tester) async {
       final path = '${temporaryDirectory.path}/round-trip.paint';
       final fileService = _TestDocumentFileService(
@@ -74,18 +67,38 @@ void main() {
         savePath: path,
       );
       await tester.pumpWidget(PainterApp(fileService: fileService));
+      await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Side by side'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pane-mode-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Canvas').last);
+      await tester.pumpAndSettle();
 
-      final canvasFinder = find.byType(CanvasView);
-      final controller = tester.widget<CanvasView>(canvasFinder).controller;
+      final views = tester
+          .widgetList<CanvasView>(find.byType(CanvasView))
+          .toList();
+      expect(views, hasLength(2));
+      final canvasFinder = find.byType(CanvasView).first;
+      final controller = views.first.controller;
+      final viewports = views.map((view) => view.viewport).toList();
       await _drawStroke(tester, canvasFinder, 1, const Offset(-24, 12));
+      await _drawStroke(
+        tester,
+        find.byType(CanvasView).last,
+        2,
+        const Offset(36, -18),
+      );
+      expect(controller.document.strokes, hasLength(2));
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(File(path).existsSync(), isTrue);
-      expect(controller.document.strokes, hasLength(1));
-
-      await _drawStroke(tester, canvasFinder, 2, const Offset(36, -18));
       expect(controller.document.strokes, hasLength(2));
+
+      await _drawStroke(tester, canvasFinder, 3, const Offset(90, 30));
+      expect(controller.document.strokes, hasLength(3));
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
@@ -97,17 +110,25 @@ void main() {
       final expectedWeights = controller.document.strokes
           .map((stroke) => stroke.points.map((point) => point.weight).toList())
           .toList();
-      await _drawStroke(tester, canvasFinder, 3, const Offset(90, 30));
-      controller.panBy(const Offset(40, 25));
-      controller.zoomAt(const Offset(50, 50), tester.getSize(canvasFinder), 2);
+      await _drawStroke(tester, canvasFinder, 4, const Offset(120, 42));
+      final canvasSize = tester.getSize(canvasFinder);
+      for (final viewport in viewports) {
+        viewport
+          ..panBy(const Offset(40, 25))
+          ..zoomAt(const Offset(50, 50), canvasSize, 2)
+          ..rotateAt(const Offset(50, 50), canvasSize, 0.25);
+      }
 
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
 
-      expect(controller.document.strokes, hasLength(2));
+      expect(controller.document.strokes, hasLength(3));
       expect(fileService.savePathRequests, 1);
-      expect(controller.pan, Offset.zero);
-      expect(controller.zoom, 1);
+      for (final viewport in viewports) {
+        expect(viewport.pan, Offset.zero);
+        expect(viewport.zoom, 1);
+        expect(viewport.rotation, 0);
+      }
       final reopenedStrokes = controller.document.strokes.toList();
       for (var index = 0; index < reopenedStrokes.length; index++) {
         expect(

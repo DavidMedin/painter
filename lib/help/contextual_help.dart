@@ -43,9 +43,9 @@ class HelpTopics {
     title: 'Painter help',
     tooltip: 'Open help for the current control',
     description:
-        'Choose pane modes, resize or manage pane boundaries, draw and navigate '
-        'the canvas, or open and save Painter documents. Hover a control and '
-        'press F1 for its help.',
+        'Choose pane modes, split, close, and resize pane dividers, draw and '
+        'navigate the canvas, or open and save Painter documents. Hover a '
+        'control and press F1 for its help.',
   );
   static const canvas = HelpTopic(
     title: 'Canvas',
@@ -77,6 +77,28 @@ class HelpTopics {
         'Settings to configure themes. Each pane has its own Pane Mode selector '
         'in the top bar.',
   );
+  static const splitPane = HelpTopic(
+    title: 'Split pane',
+    tooltip: 'Choose a split direction',
+    description:
+        'Split this pane side-by-side or top-and-bottom. Each divider resizes '
+        'only its two adjacent regions; splits can be nested.',
+  );
+  static const closePane = HelpTopic(
+    title: 'Close pane',
+    tooltip: 'Close this pane',
+    description:
+        'Close this pane and expand its sibling to fill the space. The final '
+        'pane cannot be closed.',
+  );
+  static const paneBoundary = HelpTopic(
+    title: 'Pane boundary',
+    tooltip: 'Resize neighboring panes',
+    description:
+        'Drag this divider to resize its two adjacent panes. Nested dividers '
+        'resize only their own pair.',
+  );
+
   static const themeMode = HelpTopic(
     title: 'Theme mode',
     tooltip: 'Choose light, dark, or system theme mode',
@@ -104,21 +126,6 @@ class HelpTopics {
     description:
         'Enter an opaque RGB color as six hexadecimal digits, with or without '
         'a leading #. The preview updates to the parsed color.',
-  );
-  static const paneBoundary = HelpTopic(
-    title: 'Pane boundary',
-    tooltip: 'Resize panes or open boundary actions',
-    description:
-        'Drag an inner boundary to resize its neighboring panes. Right-click '
-        'a boundary to add a Canvas pane beside it or delete the pane on one '
-        'side. Deleting every pane reveals Open Canvas Pane.',
-  );
-  static const openCanvasPane = HelpTopic(
-    title: 'Open Canvas Pane',
-    tooltip: 'Create a Canvas pane',
-    description:
-        'Create a Canvas pane in the empty workspace. You can choose another '
-        'mode from its Pane Mode selector.',
   );
   static const touchTargets = HelpTopic(
     title: 'Touch target size',

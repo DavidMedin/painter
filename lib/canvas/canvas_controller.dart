@@ -1,15 +1,10 @@
-// What: The canvas state model. `CanvasPoint`/`CanvasStroke`/`CanvasDocument`
-// hold the saved content (including its JSON format), and `CanvasController`
-// holds everything transient: viewport pan/zoom/rotation, the in-progress
-// stroke, and the screen <-> document coordinate transforms.
-//
-// Why: One place owns every mutation of canvas state, so input code
-// (canvas_view.dart), rendering (tiled_renderer.dart, tile_cache.dart) and
-// file I/O (../main.dart) all share one source of truth and none of them
-// mutates the model directly. It imports only Flutter geometry types, so it
-// has no dependency on rendering or input code; the splat generator
-// (pencil_splats.dart) and worker (splat_worker.dart) depend on it, not the
-// reverse.
+// What: The shared canvas document and active-stroke model, plus
+//   CanvasViewportController for one pane's transient pan/zoom/rotation.
+// Why: Document content is shared by every Canvas pane, while view transforms
+//   belong to one pane. This model stays independent from input and rendering.
+// Coupled to: canvas_view.dart (input and painting), tiled_renderer.dart and
+//   tile_cache.dart (rendered document), main.dart (document lifecycle), and
+//   pencil_splats.dart / splat_worker.dart (derived marks).
 
 import 'dart:collection';
 import 'dart:math' as math;
@@ -19,17 +14,19 @@ import 'package:flutter/material.dart';
 // ---------------------------------------------------------------------------
 // Canvas state model (overview)
 //
-// What: Three kinds of state, kept deliberately apart.
+// What: Two kinds of state, kept deliberately apart.
 //   1. Document (`CanvasDocument`): an ordered, append-only list of immutable
 //      `CanvasStroke`s, each a list of `CanvasPoint`s (document-space
 //      position + brush weight). This is the only thing that is saved.
-//   2. Viewport (`CanvasController.pan/zoom/rotation`): how the document is
-//      looked at. Never saved, never part of the document; opening a file
-//      resets it (`replaceDocument`), and `resetViewport` resets it alone.
-//   3. Active chunk (`CanvasController.activePoints`): the bounded tail of the
+//   2. Active chunk (`CanvasController.activePoints`): the bounded tail of the
 //      pointer gesture being drawn right now. Completed chunks are appended to
-//      the document as immutable strokes, allowing TileCache to rasterize the
-//      trail while the latest chunk remains live.
+//      the shared document as immutable strokes, allowing TileCache to
+//      rasterize the trail while the latest chunk remains live.
+//
+// Each Canvas pane owns a `CanvasViewportController` for its view. It maps
+// between widget-local and document coordinates without changing shared
+// strokes, so panning or zooming one pane cannot move another. Viewport state
+// is transient and is not part of the saved document.
 //
 // Why this split: document coordinates must not depend on the viewport
 // (ADR 0001), so panning, zooming and rotating never touch the document and
@@ -238,24 +235,18 @@ class CanvasDocument {
   }
 }
 
-/// Owns the document, viewport, and active chunk; completed chunks from a
-/// pointer gesture are appended to the document. Notifies after every change.
+/// Owns the document and shared active chunk; completed chunks from a pointer
+/// gesture are appended to the document. Each Canvas pane has a separate
+/// [CanvasViewportController]. Notifies after every document or chunk change.
 ///
 /// Coupled to `CanvasView`, which turns pointer events into calls to
-/// [beginStroke]/[extendStroke]/[endStroke], [panBy], [zoomAt] and [rotateAt],
-/// and to `_CanvasPainter`, which applies the same viewport transform that
-/// [toScreen]/[toDocument] describe. See the overview at the top of this
-/// file.
+/// [beginStroke]/[extendStroke]/[endStroke], and `_CanvasPainter`, which reads
+/// [document] and [activePoints]. See the overview at the top of this file.
 class CanvasController extends ChangeNotifier {
   /// Prototype brush diameter in document units (equal to logical pixels at
   /// the default viewport). `PencilSplats` derives its disc radius and
   /// `PencilSplats.inkMargin` from it, so changing it changes both.
   static const double brushDiameter = 8;
-
-  /// Prototype zoom limits (ADR 0001). The tile levels in `TileGrid`
-  /// (`minLevel`..`maxLevel`) are sized to span this range.
-  static const double minimumZoom = 0.1;
-  static const double maximumZoom = 16;
 
   /// Maximum accumulated document-space path length in a live chunk. Longer
   /// pointer segments are interpolated and committed through `TileCache`.
@@ -269,9 +260,6 @@ class CanvasController extends ChangeNotifier {
   List<CanvasPoint> _activePoints = [];
   List<CanvasPoint> _activeView = const [];
   double _activeLength = 0;
-  Offset _pan = Offset.zero;
-  double _zoom = 1;
-  double _rotation = 0;
 
   CanvasDocument get document => _document;
 
@@ -279,34 +267,19 @@ class CanvasController extends ChangeNotifier {
   /// chunk is appended to the document, then a new view starts at its endpoint.
   List<CanvasPoint> get activePoints => _activeView;
 
-  Offset get pan => _pan;
-  double get zoom => _zoom;
-  double get rotation => _rotation;
-
   void _setActive(List<CanvasPoint> points) {
     _activePoints = points;
     _activeView = UnmodifiableListView(points);
   }
 
-  /// Replaces the current document, clearing any in-progress stroke and
-  /// resetting the viewport. Used when opening a file (`_PainterAppState` in
-  /// main.dart). `TileCache.attach` sees the new instance and discards every
-  /// tile.
+  /// Replaces the shared document and clears any in-progress stroke. Used when
+  /// opening a file (`_PainterAppState` in main.dart); that owner resets each
+  /// pane's [CanvasViewportController]. `TileCache.attach` sees the new
+  /// instance and discards every tile.
   void replaceDocument(CanvasDocument document) {
     _document = document;
     _setActive([]);
     _activeLength = 0;
-    _pan = Offset.zero;
-    _zoom = 1;
-    _rotation = 0;
-    notifyListeners();
-  }
-
-  /// Returns pan, zoom, and rotation to their defaults, keeping the document.
-  void resetViewport() {
-    _pan = Offset.zero;
-    _zoom = 1;
-    _rotation = 0;
     notifyListeners();
   }
 
@@ -380,27 +353,53 @@ class CanvasController extends ChangeNotifier {
     _document._addStroke(CanvasStroke(_activePoints, seed: _document.nextSeed));
   }
 
-  /// Maps a screen (widget-local) position to document space by undoing the
-  /// viewport transform: remove pan, rotate by `-rotation` and divide by zoom,
-  /// both about the viewport centre. The inverse of [toScreen], and the same
-  /// transform `_CanvasPainter.paint` applies to the canvas.
+  double _clampWeight(double weight) => weight.clamp(0.05, 1).toDouble();
+}
+
+/// Owns the transient view of the shared canvas for exactly one pane.
+///
+/// Panning, zooming, rotating, and coordinate conversion use this object's
+/// state only. `CanvasController` owns the shared document and active stroke;
+/// every Canvas pane listens to both objects so document changes appear in all
+/// views without coupling their individual view transforms.
+class CanvasViewportController extends ChangeNotifier {
+  /// Prototype zoom limits (ADR 0001). The tile levels in `TileGrid`
+  /// (`minLevel`..`maxLevel`) are sized to span this range.
+  static const double minimumZoom = 0.1;
+  static const double maximumZoom = 16;
+
+  Offset _pan = Offset.zero;
+  double _zoom = 1;
+  double _rotation = 0;
+
+  Offset get pan => _pan;
+  double get zoom => _zoom;
+  double get rotation => _rotation;
+
+  /// Returns this pane's pan, zoom, and rotation to their defaults.
+  void resetViewport() {
+    _pan = Offset.zero;
+    _zoom = 1;
+    _rotation = 0;
+    notifyListeners();
+  }
+
+  /// Maps widget-local [screenPosition] to document space by undoing this
+  /// viewport's transform about [viewportSize]'s centre.
   Offset toDocument(Offset screenPosition, Size viewportSize) {
     final center = Offset(viewportSize.width / 2, viewportSize.height / 2);
     final centered = screenPosition - center - _pan;
     return _rotate(centered, -_rotation) / _zoom + center;
   }
 
-  /// Pans by [delta] screen pixels. Pan is applied after rotation and zoom, so
-  /// it is always in screen space.
+  /// Pans by [delta] screen pixels. Pan is applied after rotation and zoom.
   void panBy(Offset delta) {
     _pan += delta;
     notifyListeners();
   }
 
-  /// Multiplies zoom by [factor] (clamped to [minimumZoom]..[maximumZoom]) and
-  /// adjusts pan so the document point under [screenPosition] stays under it.
-  /// Used for wheel zoom (`CanvasView._onPointerSignal`) and trackpad pinch
-  /// (`CanvasView._onPanZoomUpdate`).
+  /// Zooms by [factor] about [screenPosition], keeping its document point
+  /// anchored while clamping to [minimumZoom]..[maximumZoom].
   void zoomAt(Offset screenPosition, Size viewportSize, double factor) {
     final documentPosition = toDocument(screenPosition, viewportSize);
     _zoom = (_zoom * factor).clamp(minimumZoom, maximumZoom).toDouble();
@@ -408,10 +407,8 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Rotates by [delta] radians about the document point under
-  /// [screenPosition], compensating pan so that point stays put. Used for
-  /// middle-drag rotate (`CanvasView._onPointerMove`) and trackpad twist
-  /// (`CanvasView._onPanZoomUpdate`).
+  /// Rotates by [delta] radians about [screenPosition], keeping its document
+  /// point anchored.
   void rotateAt(Offset screenPosition, Size viewportSize, double delta) {
     final documentPosition = toDocument(screenPosition, viewportSize);
     _rotation += delta;
@@ -419,15 +416,13 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Maps a document-space position to screen space; the inverse of
+  /// Maps a document position to widget-local screen space, inverse of
   /// [toDocument].
   Offset toScreen(Offset documentPosition, Size viewportSize) {
     final center = Offset(viewportSize.width / 2, viewportSize.height / 2);
     final centered = (documentPosition - center) * _zoom;
     return _rotate(centered, _rotation) + center + _pan;
   }
-
-  double _clampWeight(double weight) => weight.clamp(0.05, 1).toDouble();
 
   Offset _rotate(Offset point, double radians) {
     final cosine = math.cos(radians);

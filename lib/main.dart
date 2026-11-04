@@ -1,7 +1,8 @@
-// What: The app shell. `main` restores settings and starts [PainterApp], which
-//   owns the canvas controller, selected document path, pane renderers, help,
-//   touch sizing, and theme settings. It builds the themed MaterialApp with Open
-//   / Save controls and selectable Canvas, Diagnostics, and Settings panes.
+// What: The app shell owns the shared document, per-pane renderers and
+//   viewports, document path, help, and theme settings.
+// Why: File/settings persistence and per-pane view lifecycle cross the canvas
+//   and pane systems, so PainterApp coordinates them without coupling the
+//   document model to dialogs or preferences.
 //
 // Why: This shell owns state that crosses the canvas, document, settings, and
 //   pane systems. Keeping file and settings persistence here avoids coupling
@@ -34,10 +35,10 @@
 // Open flow (_openDocument): DocumentFileService.chooseOpenPath ->
 // DocumentFileService.readDocument -> jsonDecode ->
 // CanvasDocument.fromJson (validates format identifier/version, throws
-// FormatException) -> CanvasController.replaceDocument (also resets the
-// viewport) -> remember the path. The document is replaced only after every
-// earlier step succeeded, so a failed open leaves the current document
-// untouched (ADR 0002).
+// FormatException) -> CanvasController.replaceDocument -> reset each existing
+// Canvas pane's viewport -> remember the path. The document is replaced only
+// after every earlier step succeeded, so a failed open leaves it untouched
+// (ADR 0002).
 //
 // Save flow (_saveDocument): use the remembered path, or ask
 // DocumentFileService.chooseSavePath with the suggested name 'Untitled.paint'
@@ -57,14 +58,13 @@
 // FlutterError.onError or runZonedGuarded), so that part of the brief is not
 // implemented here.
 //
-// Pane system (docs/decisions/0010-pane-system.md): PaneSystem owns the pane
-// layout, Pane Mode selectors, boundary menus, and widths. This shell keeps a
-// TiledRenderer for every pane id, even while the pane shows Diagnostics, so
-// changing modes preserves diagnostic state. A Diagnostics pane reads the
-// first visible Canvas pane's renderer, or its own retained renderer when no
-// Canvas pane is visible. F3 toggles Diagnostics beside the focused pane.
-// _debugOptions is shared with every CanvasView (which paints the overlays) and
-// each CanvasDebugPane (which edits the switches).
+// Pane system (docs/decisions/0010-pane-system.md): PaneSystem owns the split
+// tree, pane types, focus, and resize weights. The shell shares one document
+// controller across Canvas panes, retains renderers per pane, and owns an
+// independent viewport per Canvas pane. Diagnostics reads the first Canvas
+// pane's renderer and viewport, or uses its own retained pane state if no
+// Canvas is visible. F3 docks Diagnostics beside Canvas; _debugOptions is
+// shared with every CanvasView and CanvasDebugPane.
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -128,6 +128,7 @@ class _PainterAppState extends State<PainterApp> {
 
   final CanvasDebugOptions _debugOptions = CanvasDebugOptions();
   final HelpState _helpState = HelpState();
+  final Map<int, CanvasViewportController> _viewports = {};
   final Map<int, TiledRenderer> _renderers = {};
   final GlobalKey<PaneSystemState> _paneSystemKey =
       GlobalKey<PaneSystemState>();
@@ -146,10 +147,20 @@ class _PainterAppState extends State<PainterApp> {
 
   void _onPaneRemoved(int paneId) {
     _renderers.remove(paneId)?.dispose();
+    _viewports.remove(paneId)?.dispose();
+  }
+
+  void _onPaneTypeChanged(int paneId, PaneKind kind) {
+    if (kind != PaneKind.canvas) {
+      _viewports.remove(paneId)?.dispose();
+    }
   }
 
   TiledRenderer _rendererFor(int paneId) =>
       _renderers.putIfAbsent(paneId, TiledRenderer.new);
+
+  CanvasViewportController _viewportFor(int paneId) =>
+      _viewports.putIfAbsent(paneId, CanvasViewportController.new);
 
   /// Builds pane content from its selected kind and required retained state.
   Widget _buildPaneContent(BuildContext context, PaneDescriptor pane) {
@@ -158,6 +169,7 @@ class _PainterAppState extends State<PainterApp> {
       PaneKind.canvas => CanvasView(
         key: ValueKey('canvas-${pane.id}'),
         controller: _controller,
+        viewport: _viewportFor(pane.id),
         debugOptions: _debugOptions,
         renderer: paneRenderer,
       ),
@@ -166,16 +178,17 @@ class _PainterAppState extends State<PainterApp> {
     };
   }
 
-  /// Builds diagnostics against the visible Canvas, or this pane's retained
-  /// renderer when no Canvas pane is visible.
+  /// Builds diagnostics from the first Canvas, or this pane when none is visible.
   Widget _diagnosticsContent(PaneDescriptor pane, TiledRenderer paneRenderer) {
+    final canvasPaneId = pane.canvasPaneId ?? pane.id;
     final renderer = pane.canvasPaneId == null
         ? paneRenderer
-        : _rendererFor(pane.canvasPaneId!);
+        : _rendererFor(canvasPaneId);
     return CanvasDebugPane(
       key: ValueKey('diagnostics-${pane.id}'),
       renderer: renderer,
       controller: _controller,
+      viewport: _viewportFor(canvasPaneId),
       options: _debugOptions,
     );
   }
@@ -192,6 +205,9 @@ class _PainterAppState extends State<PainterApp> {
     _debugOptions.dispose();
     _helpState.dispose();
     _controller.dispose();
+    for (final viewport in _viewports.values) {
+      viewport.dispose();
+    }
     super.dispose();
   }
 
@@ -221,6 +237,9 @@ class _PainterAppState extends State<PainterApp> {
       final document = CanvasDocument.fromJson(jsonDecode(contents));
       if (!mounted) return;
       _controller.replaceDocument(document);
+      for (final viewport in _viewports.values) {
+        viewport.resetViewport();
+      }
       _documentPath = path;
     } catch (error, stackTrace) {
       if (!context.mounted) return;
@@ -371,6 +390,7 @@ class _PainterAppState extends State<PainterApp> {
                 key: _paneSystemKey,
                 contentBuilder: _buildPaneContent,
                 onPaneRemoved: _onPaneRemoved,
+                onPaneTypeChanged: _onPaneTypeChanged,
               ),
             ),
           ),

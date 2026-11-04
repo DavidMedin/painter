@@ -1,7 +1,7 @@
-// What: Unit coverage for theme palette serialization, brightness selection,
-//   malformed saved data, theme construction, and preference-store round trips.
-// Why: Settings survive app restarts and must retain independent light/dark
-//   palettes without allowing malformed or stale records to break startup.
+// What: Unit coverage for palette serialization, legacy keys, brightness
+//   selection, malformed data, and preference-store round trips.
+// Why: Saved custom themes must remain loadable while current themes omit the
+//   removed canvas-paper role and retain independent light/dark palettes.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,7 +11,7 @@ import 'package:painter/settings/settings_store.dart';
 
 void main() {
   group('PainterSettings', () {
-    test('round-trips independent selected light and dark custom palettes', () {
+    test('round-trips palettes and ignores the legacy paper color key', () {
       final light = PainterSettings.gruvboxLight.copyWith(
         id: 'custom-light',
         name: 'Custom Light',
@@ -20,7 +20,6 @@ void main() {
       final dark = PainterSettings.gruvboxDark.copyWith(
         id: 'custom-dark',
         name: 'Custom Dark',
-        canvasBackground: 0xFF112233,
       );
       final settings = PainterSettings(
         mode: ThemeMode.dark,
@@ -28,16 +27,21 @@ void main() {
         darkThemeId: dark.id,
         customThemes: [light, dark],
       );
+      final legacyTheme = {...dark.toJson(), 'canvasBackground': 0xFF112233};
+      final stored = {
+        ...settings.toJson(),
+        'customThemes': [light.toJson(), legacyTheme],
+      };
 
-      final restored = PainterSettings.fromJson(settings.toJson());
+      final restored = PainterSettings.fromJson(stored);
 
       expect(restored.mode, ThemeMode.dark);
       expect(restored.themeFor(Brightness.light).primary, 0xFF123456);
-      expect(restored.themeFor(Brightness.dark).canvasBackground, 0xFF112233);
-      expect(restored.customThemes.map((theme) => theme.id), [
-        'custom-light',
-        'custom-dark',
-      ]);
+      expect(restored.themeFor(Brightness.dark).name, 'Custom Dark');
+      expect(
+        restored.customThemes.last.toJson().containsKey('canvasBackground'),
+        isFalse,
+      );
     });
 
     test(
@@ -68,18 +72,15 @@ void main() {
       },
     );
 
-    test(
-      'builds Material colors and semantic canvas colors from the palette',
-      () {
-        final theme = PainterSettings.gruvboxLight.themeData;
-        final colors = theme.extension<PainterThemeColors>()!;
+    test('builds Material and semantic status colors from the palette', () {
+      final theme = PainterSettings.gruvboxLight.themeData;
+      final colors = theme.extension<PainterThemeColors>()!;
 
-        expect(theme.brightness, Brightness.light);
-        expect(theme.colorScheme.primary, const Color(0xFFAF3A03));
-        expect(colors.canvasBackground, const Color(0xFFFBF1C7));
-        expect(colors.success, const Color(0xFF79740E));
-      },
-    );
+      expect(theme.brightness, Brightness.light);
+      expect(theme.colorScheme.primary, const Color(0xFFAF3A03));
+      expect(colors.success, const Color(0xFF79740E));
+      expect(colors.warning, const Color(0xFFB57614));
+    });
   });
 
   group('SharedPreferencesPainterSettingsStore', () {

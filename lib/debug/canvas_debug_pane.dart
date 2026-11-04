@@ -28,15 +28,12 @@
 //   reports (ADR 0006, Context).
 //
 // The boundary rule (data flows one way):
-//   - The core only RECORDS: TileCache.counters (TileCacheCounters) and
-//     TiledRenderer.frame (TileFrameStats), plus the TileCache getters.
-//     The core files (tile_cache.dart, tiled_renderer.dart, tile_stats.dart)
-//     import nothing from lib/debug; the one canvas file that does is
-//     canvas_view.dart, which imports tile_overlay.dart and
-//     canvas_debug_options.dart (not this pane).
-//   - The pane only READS those, and WRITES exactly: TileCache.maxInFlight,
-//     TileCache.maxTiles, TileCache.invalidateAll(),
-//     CanvasController.resetViewport(), and the CanvasDebugOptions switches.
+//   - TileCache, TiledRenderer, and tile statistics only record diagnostic
+//     data; core files do not import this pane. CanvasView imports only the
+//     overlay painter and option switches needed to display diagnostics.
+//   - The pane reads the shared document and renderer, resets only the supplied
+//     CanvasViewportController, and edits cache limits/invalidation and
+//     CanvasDebugOptions switches.
 //
 // How it works:
 //   - A Timer (default every 250 ms, not per canvas frame) builds one
@@ -81,9 +78,9 @@ import 'tile_overlay.dart';
 /// size, not a measurement of GPU allocation.
 const int _tileBytes = TileGrid.texturePixels * TileGrid.texturePixels * 4;
 
-/// The docked tool pane that shows the tile cache's internals and exposes a few
-/// controls. Pure presentation: it reads [renderer] and [controller] and edits
-/// [options] and the cache's limits; it has no state the app depends on.
+/// The docked tool pane shows tile-cache internals and exposes a few controls.
+/// It reads [renderer], [controller], and this pane's [viewport], edits
+/// [options] and cache limits, and owns no state the app depends on.
 ///
 /// Readouts refresh on a short timer rather than on every canvas frame so the
 /// pane costs almost nothing while you draw, and freeze while
@@ -98,12 +95,14 @@ class CanvasDebugPane extends StatefulWidget {
     super.key,
     required this.renderer,
     required this.controller,
+    required this.viewport,
     required this.options,
     this.refresh = const Duration(milliseconds: 250),
   });
 
   final TiledRenderer renderer;
   final CanvasController controller;
+  final CanvasViewportController viewport;
   final CanvasDebugOptions options;
   final Duration refresh;
 
@@ -113,7 +112,11 @@ class CanvasDebugPane extends StatefulWidget {
 
 class _CanvasDebugPaneState extends State<CanvasDebugPane> {
   Timer? _timer;
-  late _Reading _reading = _Reading.of(widget.renderer, widget.controller);
+  late _Reading _reading = _Reading.of(
+    widget.renderer,
+    widget.controller,
+    widget.viewport,
+  );
 
   /// Status line shown under the buttons after a copy; never cleared while the
   /// pane stays open.
@@ -157,7 +160,13 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
   /// the snapshot advances on its own.
   void _tick() {
     if (!mounted || widget.options.paused) return;
-    setState(() => _reading = _Reading.of(widget.renderer, widget.controller));
+    setState(
+      () => _reading = _Reading.of(
+        widget.renderer,
+        widget.controller,
+        widget.viewport,
+      ),
+    );
   }
 
   /// Takes a reading immediately, ignoring [CanvasDebugOptions.paused]. Called
@@ -166,7 +175,11 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
   /// effect is shown at once rather than at the next timer tick, and by
   /// [_copyReport].
   void _refreshNow() => setState(
-    () => _reading = _Reading.of(widget.renderer, widget.controller),
+    () => _reading = _Reading.of(
+      widget.renderer,
+      widget.controller,
+      widget.viewport,
+    ),
   );
 
   /// Takes a fresh reading, then copies its text report. The refresh happens
@@ -227,9 +240,8 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 ),
               ],
             ),
-            // Viewport: CanvasController zoom/rotation/pan plus the size of
-            // TileFrameStats.visibleRect. "Reset view" calls
-            // CanvasController.resetViewport().
+            // Viewport: the selected Canvas pane's zoom/rotation/pan plus the
+            // size of TileFrameStats.visibleRect.
             ImSection(
               title: 'Viewport',
               children: [
@@ -252,7 +264,7 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                   label: 'Reset view',
                   topic: HelpTopics.resetView,
                   onPressed: () {
-                    widget.controller.resetViewport();
+                    widget.viewport.resetViewport();
                     _refreshNow();
                   },
                 ),
@@ -500,14 +512,19 @@ class _Reading {
   /// Takes the snapshot: copies every field of `renderer.frame`
   /// (TileFrameStats) and `renderer.cache.counters` (TileCacheCounters) into
   /// fresh objects, copies the two history queues into lists, and reads the
-  /// TileCache and CanvasController getters once.
+  /// TileCache and CanvasController getters once, plus the selected pane's
+  /// viewport values.
   ///
-  /// Coupled to those two classes (lib/canvas/tile_stats.dart): the copies
+  /// Coupled to those core classes (lib/canvas/tile_stats.dart): the copies
   /// are written field by field, so a field added to TileFrameStats or
   /// TileCacheCounters must also be copied here or the pane will silently show
   /// zero for it. `TileFrameStats.draws` is deliberately not copied; the
   /// [draws] map of per-state counts is rebuilt from the copied counters.
-  factory _Reading.of(TiledRenderer renderer, CanvasController controller) {
+  factory _Reading.of(
+    TiledRenderer renderer,
+    CanvasController controller,
+    CanvasViewportController viewport,
+  ) {
     final cache = renderer.cache;
     final f = renderer.frame;
     final copy = TileFrameStats()
@@ -545,9 +562,9 @@ class _Reading {
     return _Reading(
       frame: copy,
       counters: snapshot,
-      zoom: controller.zoom,
-      rotation: controller.rotation,
-      pan: controller.pan,
+      zoom: viewport.zoom,
+      rotation: viewport.rotation,
+      pan: viewport.pan,
       imageTiles: cache.imageTiles,
       strokes: controller.document.strokeCount,
       points: points,

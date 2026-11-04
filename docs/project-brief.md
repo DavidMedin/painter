@@ -12,10 +12,14 @@ Create painting software using Flutter and Dart.
 - On launch without a file, the app opens directly to a blank canvas ready for painting; there is no splash screen.
 - Appearance supports System, Light, and Dark modes. Light and dark palettes are
   selected independently; Gruvbox Light and Gruvbox Dark are built in, and the
-  user can create and save custom palettes.
-- Program UI colors, including canvas paper and diagnostics, follow the active
-  palette. Canvas marks remain painting content rather than UI theme colors.
+  user can create and save custom palettes. Program UI colors follow the active
+  palette; canvas paper is fixed white regardless of app theme, and canvas marks
+  remain painting content rather than UI theme colors.
 - Appearance controls are available in selectable Settings pane content.
+- Pane layouts support side-by-side and top-and-bottom splits with draggable
+  dividers. Each content selector visibly identifies its selected pane mode.
+- Multiple Canvas panes show the same document but keep independent pan, zoom,
+  and rotation. Opening a document resets every Canvas pane's view.
 
 ## First Painting Workflow (T-004)
 
@@ -70,6 +74,11 @@ Use an append-only database*: strokes, including eraser strokes, overlay existin
 - Opening a file replaces the current canvas/document with the opened content. Saving and reopening a document preserves its content.
 - Theme mode follows the system or stays explicitly light/dark; separate light
   and dark palette selections and custom palette colors survive an app restart.
+- Canvas paper stays white in every theme. Multiple Canvas panes show the same
+  document with independent pan, zoom, and rotation, and opening a document
+  resets each view.
+- Panes can split side-by-side or top-and-bottom; their selected content mode
+  is visually emphasized, and each divider resizes only its adjacent panes.
 - A failed file operation shows the described popup and expandable details, is logged, and leaves the app running. A non-fatal internal error or exception is logged without terminating the app. A fatal error is logged with its stack trace and relevant information before termination.
 - Unit tests cover applicable isolated behavior. Integration tests cover interactions between modular components, including drawing a stroke and verifying the resulting canvas/document change. The finished macOS build must also demonstrate the user-visible scenarios; tests alone are insufficient.
 

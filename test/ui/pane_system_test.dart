@@ -1,12 +1,13 @@
-// What: Widget tests cover pane mode selection, visible borders, boundary
-//   menus, resizing, deletion to zero panes, and reopening the workspace.
-// Why: PaneSystem owns pane identity, ordering, and relative widths, so each
-//   boundary action must preserve the adjacent-pane and empty-state contracts.
+// What: Widget tests for pane modes, contextual help, split direction, resizing,
+//   focus, and close.
+// Why: PaneSystem owns pane identity and split weights, so actions must update
+//   the visible layout, preserve the final pane, and expose relevant help.
 // Covers: lib/ui/pane_system.dart (PaneSystem and PaneSystemState).
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:painter/help/contextual_help.dart';
 import 'package:painter/ui/pane_system.dart';
 
 Widget _content(BuildContext context, PaneDescriptor pane) =>
@@ -16,157 +17,139 @@ Widget _host() {
   return MaterialApp(
     home: Scaffold(
       body: SizedBox.expand(
-        child: PaneSystem(contentBuilder: _content, onPaneRemoved: (_) {}),
+        child: PaneSystem(
+          contentBuilder: _content,
+          onPaneRemoved: (_) {},
+          onPaneTypeChanged: (_, _) {},
+        ),
       ),
     ),
   );
 }
 
-Future<void> _rightClickAt(WidgetTester tester, Offset position) async {
-  final gesture = await tester.startGesture(
-    position,
-    kind: PointerDeviceKind.mouse,
-    buttons: kSecondaryMouseButton,
+Color _paneBorderColor(WidgetTester tester, int paneId) {
+  final listener = tester.widget<Listener>(
+    find.byKey(ValueKey('pane-$paneId')),
   );
-  await gesture.up();
-  await tester.pumpAndSettle();
+  final decoration = listener.child! as DecoratedBox;
+  final border = (decoration.decoration as BoxDecoration).border! as Border;
+  return border.top.color;
 }
 
 void main() {
-  testWidgets('Pane Mode selector has visible contrast and rounded borders', (
+  testWidgets('pane controls expose their contextual help', (tester) async {
+    final helpState = HelpState();
+    final pointer = TestPointer(42, PointerDeviceKind.mouse);
+    addTearDown(helpState.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HelpScope(
+            helpState: helpState,
+            child: SizedBox.expand(
+              child: PaneSystem(
+                contentBuilder: _content,
+                onPaneRemoved: (_) {},
+                onPaneTypeChanged: (_, _) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    Future<void> hover(Finder target, HelpTopic expected) async {
+      await tester.sendEventToBinding(pointer.hover(tester.getCenter(target)));
+      await tester.pump();
+      expect(helpState.activeTopic, expected);
+    }
+
+    await hover(find.byKey(const ValueKey('pane-mode-0')), HelpTopics.paneType);
+    final splitButton = find.byKey(const ValueKey('split-menu-0'));
+    await hover(splitButton, HelpTopics.splitPane);
+    await tester.tap(splitButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Side by side'));
+    await tester.pumpAndSettle();
+    await hover(
+      find.bySemanticsLabel('Resize pane boundary'),
+      HelpTopics.paneBoundary,
+    );
+    await hover(find.text('Close').last, HelpTopics.closePane);
+  });
+  testWidgets('selected pane mode is visible and replaces its content', (
     tester,
   ) async {
     await tester.pumpWidget(_host());
+    final selector = find.byKey(const ValueKey('pane-mode-0'));
+    var dropdown = tester.widget<DropdownButton<PaneKind>>(selector);
+    expect(dropdown.value, PaneKind.canvas);
+    expect(dropdown.style!.fontWeight, FontWeight.w600);
+    expect(find.text('canvas-0'), findsOneWidget);
 
-    expect(find.text('Pane Mode'), findsOneWidget);
-    expect(find.byKey(const ValueKey('pane-mode-0')), findsOneWidget);
-    expect(find.text('Split'), findsNothing);
-    expect(find.text('Close'), findsNothing);
-
-    final theme = Theme.of(tester.element(find.byType(Scaffold)));
-    final frame = tester.widget<Container>(
-      find.byKey(const ValueKey('pane-frame-0')),
-    );
-    final frameDecoration = frame.decoration! as BoxDecoration;
-    expect(frameDecoration.borderRadius, BorderRadius.circular(8));
-    expect(frameDecoration.border!.top.width, 1.5);
-
-    final header = tester.widget<DecoratedBox>(
-      find.byKey(const ValueKey('pane-header-0')),
-    );
-    final headerColor = (header.decoration as BoxDecoration).color;
-    expect(headerColor, theme.colorScheme.surfaceContainerHigh);
-    expect(headerColor, isNot(theme.colorScheme.surface));
-
-    await tester.tap(find.byKey(const ValueKey('pane-mode-0')));
+    await tester.tap(selector);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Diagnostics').last);
     await tester.pumpAndSettle();
 
+    dropdown = tester.widget<DropdownButton<PaneKind>>(selector);
+    expect(dropdown.value, PaneKind.diagnostics);
+    expect(find.text('canvas-0'), findsNothing);
     expect(find.text('diagnostics-0'), findsOneWidget);
-    expect(find.byKey(const ValueKey('pane-mode-0')), findsOneWidget);
   });
 
-  testWidgets(
-    'inner boundary adds between panes, resizes, and deletes beside',
-    (tester) async {
-      await tester.pumpWidget(_host());
-      await _rightClickAt(
-        tester,
-        tester.getCenter(find.byKey(const ValueKey('pane-boundary-1'))),
-      );
-      expect(find.text('Add pane to the right'), findsOneWidget);
-      expect(find.text('Delete left pane'), findsOneWidget);
-      expect(find.text('Delete right pane'), findsNothing);
-      await tester.tap(find.text('Add pane to the right'));
-      await tester.pumpAndSettle();
+  testWidgets('side-by-side and top-bottom splits resize and close', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    final pane = find.byKey(const ValueKey('pane-0'));
+    final initial = tester.getSize(pane);
 
-      expect(find.text('canvas-0'), findsOneWidget);
-      expect(find.text('canvas-1'), findsOneWidget);
-      final firstPane = find.byKey(const ValueKey('pane-0'));
-      final widthBefore = tester.getSize(firstPane).width;
-      await tester.drag(
-        find.byKey(const ValueKey('pane-boundary-1')),
-        const Offset(80, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(tester.getSize(firstPane).width, greaterThan(widthBefore + 40));
+    await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Side by side'));
+    await tester.pumpAndSettle();
+    expect(find.text('canvas-0'), findsOneWidget);
+    expect(find.text('diagnostics-1'), findsOneWidget);
+    final primary = Theme.of(tester.element(find.byType(PaneSystem)))
+        .colorScheme
+        .primary;
+    expect(_paneBorderColor(tester, 1), primary);
+    await tester.tap(find.text('canvas-0'));
+    await tester.pump();
+    expect(_paneBorderColor(tester, 0), primary);
+    final widthBefore = tester.getSize(pane).width;
+    await tester.drag(
+      find.bySemanticsLabel('Resize pane boundary'),
+      const Offset(80, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(pane).width, greaterThan(widthBefore + 40));
+    expect(tester.getSize(pane).height, closeTo(initial.height, 1));
 
-      await _rightClickAt(
-        tester,
-        tester.getCenter(find.byKey(const ValueKey('pane-boundary-1'))),
-      );
-      expect(find.text('Add pane between panes'), findsOneWidget);
-      expect(find.text('Delete left pane'), findsOneWidget);
-      expect(find.text('Delete right pane'), findsOneWidget);
-      await tester.tap(find.text('Add pane between panes'));
-      await tester.pumpAndSettle();
-      expect(find.text('canvas-0'), findsOneWidget);
-      expect(find.text('canvas-2'), findsOneWidget);
-      expect(find.text('canvas-1'), findsOneWidget);
+    await tester.tap(find.text('Close').last);
+    await tester.pumpAndSettle();
+    expect(find.text('canvas-0'), findsOneWidget);
 
-      await _rightClickAt(
-        tester,
-        tester.getCenter(find.byKey(const ValueKey('pane-boundary-3'))),
-      );
-      expect(find.text('Add pane to the right'), findsOneWidget);
-      expect(find.text('Delete left pane'), findsOneWidget);
-      expect(find.text('Delete right pane'), findsNothing);
-      await tester.tap(find.text('Delete left pane'));
-      await tester.pumpAndSettle();
-      expect(find.text('canvas-1'), findsNothing);
-      expect(find.text('canvas-0'), findsOneWidget);
-      expect(find.text('canvas-2'), findsOneWidget);
-    },
-  );
+    await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Top and bottom'));
+    await tester.pumpAndSettle();
+    expect(find.text('canvas-0'), findsOneWidget);
+    expect(find.text('diagnostics-2'), findsOneWidget);
+    final heightBefore = tester.getSize(pane).height;
+    await tester.drag(
+      find.bySemanticsLabel('Resize pane boundary'),
+      const Offset(0, 80),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(pane).height, greaterThan(heightBefore + 40));
+    expect(tester.getSize(pane).width, closeTo(initial.width, 1));
 
-  testWidgets(
-    'outer-left actions add beside, delete to zero, and reopen Canvas',
-    (tester) async {
-      await tester.pumpWidget(_host());
-      await _rightClickAt(
-        tester,
-        tester.getCenter(find.byKey(const ValueKey('pane-boundary-0'))),
-      );
-      expect(find.text('Add pane to the left'), findsOneWidget);
-      expect(find.text('Delete right pane'), findsOneWidget);
-      expect(find.text('Delete left pane'), findsNothing);
-      await tester.tap(find.text('Add pane to the left'));
-      await tester.pumpAndSettle();
-      expect(find.text('canvas-1'), findsOneWidget);
-      expect(find.text('canvas-0'), findsOneWidget);
-
-      await _rightClickAt(
-        tester,
-        tester.getCenter(find.byKey(const ValueKey('pane-boundary-0'))),
-      );
-      await tester.tap(find.text('Delete right pane'));
-      await tester.pumpAndSettle();
-      expect(find.text('canvas-1'), findsNothing);
-      expect(find.text('canvas-0'), findsOneWidget);
-
-      await _rightClickAt(
-        tester,
-        tester.getCenter(find.byKey(const ValueKey('pane-boundary-0'))),
-      );
-      await tester.tap(find.text('Delete right pane'));
-      await tester.pumpAndSettle();
-      expect(find.text('Pane Mode'), findsNothing);
-      expect(find.text('canvas-0'), findsNothing);
-
-      final openButton = find.widgetWithText(FilledButton, 'Open Canvas Pane');
-      expect(openButton, findsOneWidget);
-      final button = tester.widget<FilledButton>(openButton);
-      final style = button.style!;
-      final colors = Theme.of(tester.element(openButton)).colorScheme;
-      expect(style.backgroundColor!.resolve({}), colors.primary);
-      expect(style.foregroundColor!.resolve({}), colors.onPrimary);
-      expect(colors.primary, isNot(colors.surface));
-
-      await tester.tap(openButton);
-      await tester.pumpAndSettle();
-      expect(find.text('canvas-2'), findsOneWidget);
-      expect(find.text('Pane Mode'), findsOneWidget);
-    },
-  );
+    await tester.tap(find.text('Close').last);
+    await tester.pumpAndSettle();
+    expect(find.text('canvas-0'), findsOneWidget);
+    expect(find.text('Close'), findsNothing);
+  });
 }

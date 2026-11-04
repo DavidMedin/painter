@@ -35,6 +35,7 @@ void main() {
     );
     final canvasFinder = find.byType(CanvasView);
     final controller = tester.widget<CanvasView>(canvasFinder).controller;
+    final viewport = tester.widget<CanvasView>(canvasFinder).viewport;
     final size = tester.getSize(canvasFinder);
     final topLeft = tester.getTopLeft(canvasFinder);
     final center = topLeft + Offset(size.width / 2, size.height / 2);
@@ -101,11 +102,11 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(panMouse.up());
-    expect(controller.pan, const Offset(12, 7));
+    expect(viewport.pan, const Offset(12, 7));
 
     final zoomAnchor = center + const Offset(60, -40);
     final localZoomAnchor = zoomAnchor - topLeft;
-    final documentAnchor = controller.toDocument(localZoomAnchor, size);
+    final documentAnchor = viewport.toDocument(localZoomAnchor, size);
     await tester.sendEventToBinding(
       PointerScrollEvent(
         position: zoomAnchor,
@@ -113,8 +114,8 @@ void main() {
         scrollDelta: const Offset(0, -100),
       ),
     );
-    expect(controller.zoom, greaterThan(1));
-    final zoomedAnchor = controller.toScreen(documentAnchor, size);
+    expect(viewport.zoom, greaterThan(1));
+    final zoomedAnchor = viewport.toScreen(documentAnchor, size);
     expect(zoomedAnchor.dx, closeTo(localZoomAnchor.dx, 0.001));
     expect(zoomedAnchor.dy, closeTo(localZoomAnchor.dy, 0.001));
 
@@ -129,6 +130,6 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(rotateMouse.up());
-    expect(controller.rotation, closeTo(0.5, 0.001));
+    expect(viewport.rotation, closeTo(0.5, 0.001));
   });
 }

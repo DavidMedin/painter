@@ -120,7 +120,7 @@ class TileGrid {
   /// Document-space bounding box of the screen rectangle `Offset.zero & size`
   /// mapped through [toDocument]. Exact for rotation because all four corners
   /// are mapped. Called by `_CanvasPainter.paint` in canvas_view.dart with
-  /// `CanvasController.toDocument`; the result is the `visible` argument of
+  /// `CanvasViewportController.toDocument`; the result is the `visible` argument of
   /// `TiledRenderer.paint`.
   static Rect visibleDocumentRect(
     Size screen,

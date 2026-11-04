@@ -1,6 +1,8 @@
-// What: `CanvasView`, the widget that turns mouse, stylus and trackpad
-// pointer events into `CanvasController` calls, and `_CanvasPainter`, which
-// draws the controller's document and viewport through a `TiledRenderer`.
+// What: `CanvasView` maps pointer events through a pane-owned viewport and
+//   `_CanvasPainter` draws the shared document through a `TiledRenderer`.
+// Why: Input handling and painting stay separate from document storage and
+//   the tile pipeline. Each view owns its viewport and renderer; all views
+//   share the document controller.
 //
 // Why: Input handling and painting live here, apart from the state model
 // (canvas_controller.dart) and the tile pipeline (tiled_renderer.dart,
@@ -59,21 +61,20 @@ import 'tiled_renderer.dart';
 //
 // Coordinate spaces: event.localPosition is in screen (widget-local) space.
 // Strokes are stored in document space, so draw events go through
-// `CanvasController.toDocument` (which needs the viewport size, hence
+// `CanvasViewportController.toDocument` (which needs the viewport size, hence
 // `_viewportSize`). Pan is in screen pixels. Zoom and rotate use screen-space
-// anchors and the controller adjusts pan to keep the anchored document point
+// anchors and the viewport adjusts pan to keep the anchored document point
 // fixed. `_CanvasPainter.paint` applies the forward mapping to the canvas
 // (pan, then centre, rotate, scale) and must stay in sync with
-// `CanvasController.toScreen`/`toDocument`; both rotate and scale about the
-// viewport centre.
+// `CanvasViewportController.toScreen`/`toDocument`; both rotate and scale about
+// the viewport centre.
 //
-// Painting: the painter repaints when the controller changes or when the tile
-// cache finishes a tile (`renderer.cache` is a Listenable), so tiles arriving
-// asynchronously need no widget rebuild. See tile_cache.dart for that system.
+// Painting: the painter repaints when the shared document, this pane's
+// viewport, tile cache, or debug options change. See tile_cache.dart for the
+// asynchronous tile pipeline.
 // ---------------------------------------------------------------------------
 
-/// The painting surface: draws the controller's document and handles pointer
-/// input as described in the overview above.
+/// The painting surface: draws the shared document using one pane's viewport.
 ///
 /// The view creates and disposes a `TiledRenderer` when none is supplied. An
 /// injected renderer is owned and disposed by the caller so pane mode changes
@@ -82,17 +83,25 @@ class CanvasView extends StatefulWidget {
   const CanvasView({
     super.key,
     required this.controller,
+    required this.viewport,
     this.debugOptions,
     this.renderer,
   });
 
+  /// Shared document and active-stroke state.
   final CanvasController controller;
+
+  /// Pan, zoom, and rotation state exclusive to this Canvas pane.
+  final CanvasViewportController viewport;
 
   /// When set, the canvas draws the overlays these options enable.
   final CanvasDebugOptions? debugOptions;
 
   /// The caller-owned renderer to use, or null to let the view create one.
   final TiledRenderer? renderer;
+
+  /// Fixed paper color, deliberately independent of the active app theme.
+  static const Color paperColor = Color(0xFFFFFFFF);
 
   @override
   State<CanvasView> createState() => _CanvasViewState();
@@ -112,7 +121,7 @@ class _CanvasViewState extends State<CanvasView> {
   late final bool _ownsRenderer = widget.renderer == null;
 
   /// Size of the painting surface, read from the `Listener`'s render box via
-  /// [_surfaceKey]. Needed because `CanvasController` transforms are about the
+  /// [_surfaceKey]. Needed because this viewport's transforms are about the
   /// viewport centre. `Size.zero` before the first layout.
   Size get _viewportSize {
     final renderObject = _surfaceKey.currentContext?.findRenderObject();
@@ -136,7 +145,7 @@ class _CanvasViewState extends State<CanvasView> {
     );
     if (interaction == _Interaction.draw) {
       widget.controller.beginStroke(
-        widget.controller.toDocument(event.localPosition, _viewportSize),
+        widget.viewport.toDocument(event.localPosition, _viewportSize),
         _weightFor(event),
       );
     }
@@ -164,13 +173,13 @@ class _CanvasViewState extends State<CanvasView> {
     switch (interaction.mode) {
       case _Interaction.draw:
         widget.controller.extendStroke(
-          widget.controller.toDocument(event.localPosition, _viewportSize),
+          widget.viewport.toDocument(event.localPosition, _viewportSize),
           _weightFor(event),
         );
       case _Interaction.pan:
-        widget.controller.panBy(delta);
+        widget.viewport.panBy(delta);
       case _Interaction.rotate:
-        widget.controller.rotateAt(
+        widget.viewport.rotateAt(
           event.localPosition,
           _viewportSize,
           delta.dx / 100,
@@ -206,7 +215,7 @@ class _CanvasViewState extends State<CanvasView> {
     if (event is! PointerScrollEvent || event.kind != PointerDeviceKind.mouse) {
       return;
     }
-    widget.controller.zoomAt(
+    widget.viewport.zoomAt(
       event.localPosition,
       _viewportSize,
       math.exp(-event.scrollDelta.dy / 500),
@@ -220,20 +229,20 @@ class _CanvasViewState extends State<CanvasView> {
   }
 
   /// Applies one trackpad update. `scale` and `rotation` in the event are
-  /// cumulative since the gesture started, so the previous values stored in
+  /// cumulative since the gesture started, so previous values stored in
   /// [_TrackpadGesture] are divided/subtracted out to get per-update
-  /// increments for `CanvasController.zoomAt`/`rotateAt`.
+  /// increments for `CanvasViewportController.zoomAt`/`rotateAt`.
   void _onPanZoomUpdate(PointerPanZoomUpdateEvent event) {
     final gesture = _trackpadGesture;
     if (gesture == null) return;
 
     if (event.panDelta != Offset.zero) {
-      widget.controller.panBy(event.panDelta);
+      widget.viewport.panBy(event.panDelta);
     }
 
     final viewportSize = _viewportSize;
     if (event.scale != gesture.lastScale) {
-      widget.controller.zoomAt(
+      widget.viewport.zoomAt(
         gesture.focalPoint,
         viewportSize,
         event.scale / gesture.lastScale,
@@ -242,7 +251,7 @@ class _CanvasViewState extends State<CanvasView> {
     }
 
     if (event.rotation != gesture.lastRotation) {
-      widget.controller.rotateAt(
+      widget.viewport.rotateAt(
         gesture.focalPoint,
         viewportSize,
         event.rotation - gesture.lastRotation,
@@ -285,6 +294,7 @@ class _CanvasViewState extends State<CanvasView> {
           child: CustomPaint(
             painter: _CanvasPainter(
               widget.controller,
+              widget.viewport,
               _renderer,
               MediaQuery.devicePixelRatioOf(context),
               widget.debugOptions,
@@ -319,24 +329,30 @@ class _TrackpadGesture {
   double lastRotation = 0;
 }
 
-/// Paints the themed canvas surface, cached tiles and the active stroke.
-/// Repaints whenever the controller (viewport, active stroke, document), the
-/// tile cache (a tile finished) or the debug options change; [shouldRepaint]
-/// only covers the constructor arguments changing. The actual tile drawing is
-/// `TiledRenderer.paint`.
+/// Paints fixed canvas paper, cached document tiles and the active stroke.
+/// Repaints when either shared document or local viewport changes, when the
+/// tile cache finishes a tile, or when debug options change. The actual tile
+/// drawing is `TiledRenderer.paint`.
 class _CanvasPainter extends CustomPainter {
   _CanvasPainter(
     this.controller,
+    this.viewport,
     this.renderer,
     this.devicePixelRatio,
     this.debugOptions,
     this.colorScheme,
     this.themeColors,
   ) : super(
-        repaint: Listenable.merge([controller, renderer.cache, ?debugOptions]),
+        repaint: Listenable.merge([
+          controller,
+          viewport,
+          renderer.cache,
+          ?debugOptions,
+        ]),
       );
 
   final CanvasController controller;
+  final CanvasViewportController viewport;
   final TiledRenderer renderer;
   final double devicePixelRatio;
   final CanvasDebugOptions? debugOptions;
@@ -345,30 +361,27 @@ class _CanvasPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawColor(themeColors.canvasBackground, BlendMode.src);
+    canvas.drawColor(CanvasView.paperColor, BlendMode.src);
     canvas.save();
     final center = Offset(size.width / 2, size.height / 2);
-    // The canvas transform must equal CanvasController.toScreen: translate by
-    // pan, then rotate and scale about the viewport centre. Document-space
-    // drawing below is therefore placed correctly on screen.
-    canvas.translate(controller.pan.dx, controller.pan.dy);
+    // The transform matches CanvasViewportController.toScreen: translate by
+    // pan, then rotate and scale about this pane's viewport centre.
+    canvas.translate(viewport.pan.dx, viewport.pan.dy);
     canvas.translate(center.dx, center.dy);
-    canvas.rotate(controller.rotation);
-    canvas.scale(controller.zoom);
+    canvas.rotate(viewport.rotation);
+    canvas.scale(viewport.zoom);
     canvas.translate(-center.dx, -center.dy);
-    // `visible` is the document-space bounding box of the screen (all four
-    // corners mapped, so it is exact under rotation). `pixelsPerUnit` is the
-    // on-screen scale of one document unit, from which the renderer picks the
-    // tile level of detail (`TileGrid.levelFor`).
+    // `visible` maps all four corners, so its document-space bounds remain
+    // exact under rotation; zoom selects the renderer's tile level of detail.
     renderer.paint(
       canvas,
       document: controller.document,
       active: controller.activePoints,
       visible: TileGrid.visibleDocumentRect(
         size,
-        (screen) => controller.toDocument(screen, size),
+        (screen) => viewport.toDocument(screen, size),
       ),
-      pixelsPerUnit: controller.zoom * devicePixelRatio,
+      pixelsPerUnit: viewport.zoom * devicePixelRatio,
     );
     final options = debugOptions;
     if (options != null) {
@@ -376,7 +389,7 @@ class _CanvasPainter extends CustomPainter {
         canvas,
         frame: renderer.frame,
         options: options,
-        zoom: controller.zoom,
+        zoom: viewport.zoom,
         colorScheme: colorScheme,
         themeColors: themeColors,
       );
@@ -387,6 +400,7 @@ class _CanvasPainter extends CustomPainter {
   @override
   bool shouldRepaint(_CanvasPainter oldDelegate) =>
       oldDelegate.controller != controller ||
+      oldDelegate.viewport != viewport ||
       oldDelegate.renderer != renderer ||
       oldDelegate.devicePixelRatio != devicePixelRatio ||
       oldDelegate.debugOptions != debugOptions ||

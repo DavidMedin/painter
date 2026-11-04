@@ -1,8 +1,8 @@
 // What: PaneKind, PaneDescriptor, and PaneSystem provide selectable content
-//   panes, rounded borders, resizable boundaries, and boundary context menus.
+//   panes arranged as a resizable two-axis split tree.
 // Why: docs/project-brief.md requires modular panes with per-pane content
 //   selectors. A floating diagnostics overlay cannot provide independent
-//   side-by-side content; ADR 0010 records the docked layout decision.
+//   content areas; ADR 0010 records the docked layout decision.
 // Coupled to: main.dart (content builder and renderer ownership),
 //   contextual_help.dart (pane controls), and touch_target_settings.dart.
 //
@@ -10,14 +10,17 @@
 // Pane-system overview
 //
 // Each pane has a stable identity and one implemented content kind: Canvas,
-// Diagnostics, or Settings. The first pane is a Canvas. Each top bar selects
-// its mode. Boundary menus add a Canvas pane beside a boundary or delete the
-// pane beside it; deleting the final pane shows an Open Canvas Pane action.
-// Inner boundaries resize their adjacent pair while preserving combined width.
-// F3 adds or removes Diagnostics beside the focused pane; if Diagnostics is
-// the only pane, F3 changes it to Canvas. Pane widths are runtime-only. The
-// owner builds content from PaneDescriptor and owns content-specific state;
-// this widget knows nothing about documents or drawing.
+// Diagnostics, or Settings. Split replaces a leaf with a binary split node;
+// each split chooses side-by-side or top-and-bottom, and its divider changes
+// only that node's two child weights. Closing any leaf except the final pane
+// collapses its parent into its sibling, so nested layouts need no
+// pane-index bookkeeping. F3 creates a side-by-side Diagnostics pane beside
+// Canvas; if Diagnostics is the sole pane, F3 changes it to Canvas. The final
+// pane cannot be closed. Clicking a pane focuses it for the active border and
+// F3 target. The owner builds content from PaneDescriptor and owns one
+// renderer per pane and one viewport per Canvas pane. This widget owns pane
+// kinds, identities, focus, and split weights; layout is runtime-only, and the
+// widget never knows about documents or drawing.
 // ---------------------------------------------------------------------------
 
 import 'dart:math' as math;
@@ -25,6 +28,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../help/contextual_help.dart';
+import 'painter_action_button.dart';
 import 'touch_target_settings.dart';
 
 /// Content types currently implemented by the app's pane host.
@@ -68,430 +72,364 @@ class PaneSystem extends StatefulWidget {
     super.key,
     required this.contentBuilder,
     required this.onPaneRemoved,
+    required this.onPaneTypeChanged,
   });
 
   final PaneContentBuilder contentBuilder;
   final ValueChanged<int> onPaneRemoved;
+  final void Function(int paneId, PaneKind kind) onPaneTypeChanged;
 
   @override
   PaneSystemState createState() => PaneSystemState();
 }
 
-/// Owns pane identities, content choices, focus, and horizontal split weights.
+/// Owns pane identities, content choices, focus, and split weights.
 class PaneSystemState extends State<PaneSystem> {
-  final List<_Pane> _panes = [_Pane(id: 0, kind: PaneKind.canvas)];
-  final List<double> _weights = [1];
+  _LayoutNode _layout = _Pane(id: 0, kind: PaneKind.canvas);
   int _nextPaneId = 1;
-  int? _focusedPaneId = 0;
+  int _focusedPaneId = 0;
+
+  Iterable<_Pane> get _panes sync* {
+    yield* _leafPanes(_layout);
+  }
 
   /// Adds or removes a Diagnostics pane for the F3 shortcut.
   void toggleDiagnostics() {
-    if (_panes.isEmpty) return;
-    final diagnosticsIndex = _panes.indexWhere(
+    final panes = _panes.toList();
+    final diagnostics = panes.where(
       (pane) => pane.kind == PaneKind.diagnostics,
     );
-    if (diagnosticsIndex >= 0) {
-      if (_panes.length == 1) {
-        _setPaneKind(diagnosticsIndex, PaneKind.canvas);
+    if (diagnostics.isNotEmpty) {
+      final pane = diagnostics.first;
+      if (panes.length == 1) {
+        _setPaneKind(pane.id, PaneKind.canvas);
       } else {
-        _removePaneAt(diagnosticsIndex);
+        _closePane(pane.id);
       }
       return;
     }
 
-    final focusedIndex = _panes.indexWhere((pane) => pane.id == _focusedPaneId);
-    _insertPane(
-      focusedIndex < 0 ? _panes.length : focusedIndex + 1,
-      kind: PaneKind.diagnostics,
-    );
+    final canvas = panes.where((pane) => pane.kind == PaneKind.canvas);
+    final target = canvas.isNotEmpty ? canvas.first : panes.last;
+    _splitPane(target.id, kind: PaneKind.diagnostics, axis: Axis.horizontal);
   }
 
-  /// Replaces one pane's content without changing its identity or width.
-  void _setPaneKind(int index, PaneKind kind) {
-    final pane = _panes[index];
-    if (pane.kind == kind) return;
+  /// Replaces one pane's content without changing its identity or layout.
+  void _setPaneKind(int paneId, PaneKind kind) {
+    final pane = _findPane(_layout, paneId);
+    if (pane == null || pane.kind == kind) return;
     setState(() => pane.kind = kind);
+    widget.onPaneTypeChanged(pane.id, kind);
   }
 
-  /// Inserts a Canvas pane at [boundaryIndex], splitting the pane to its left
-  /// or the first pane when inserting at the outer left edge.
-  void _insertPane(int boundaryIndex, {PaneKind kind = PaneKind.canvas}) {
-    final newPane = _Pane(id: _nextPaneId++, kind: kind);
-    if (_panes.isEmpty) {
-      setState(() {
-        _panes.add(newPane);
-        _weights.add(1);
-        _focusedPaneId = newPane.id;
-      });
-      return;
-    }
-
-    final donorIndex = boundaryIndex == 0 ? 0 : boundaryIndex - 1;
-    final newWeight = _weights[donorIndex] / 2;
+  /// Replaces [paneId] with a split whose children initially share its extent.
+  void _splitPane(int paneId, {PaneKind? kind, required Axis axis}) {
+    final pane = _findPane(_layout, paneId);
+    if (pane == null) return;
+    final newPane = _Pane(
+      id: _nextPaneId++,
+      kind:
+          kind ??
+          switch (pane.kind) {
+            PaneKind.canvas => PaneKind.diagnostics,
+            PaneKind.diagnostics || PaneKind.settings => PaneKind.canvas,
+          },
+    );
+    final split = _PaneSplit(axis: axis, first: pane, second: newPane);
     setState(() {
-      _weights[donorIndex] = newWeight;
-      _weights.insert(boundaryIndex, newWeight);
-      _panes.insert(boundaryIndex, newPane);
+      _layout = _replacePane(_layout, paneId, split);
       _focusedPaneId = newPane.id;
     });
+    widget.onPaneTypeChanged(newPane.id, newPane.kind);
   }
 
-  /// Removes a pane and transfers its width to a neighbor, if one exists.
-  void _removePaneAt(int index) {
-    final pane = _panes[index];
+  /// Removes [paneId] and collapses its parent split into the other child.
+  void _closePane(int paneId) {
+    final panes = _panes.toList();
+    if (panes.length == 1) return;
+    final pane = _findPane(_layout, paneId);
+    if (pane == null) return;
     setState(() {
-      if (_panes.length > 1) {
-        if (index > 0) {
-          _weights[index - 1] += _weights[index];
-        } else {
-          _weights[1] += _weights[0];
-        }
-      }
-      _weights.removeAt(index);
-      _panes.removeAt(index);
-      if (_panes.isEmpty) {
-        _focusedPaneId = null;
-      } else if (_focusedPaneId == pane.id) {
-        _focusedPaneId = _panes[math.min(index, _panes.length - 1)].id;
+      _layout = _removePane(_layout, paneId)!;
+      if (_focusedPaneId == paneId) {
+        final remaining = _panes.toList();
+        _focusedPaneId =
+            remaining[math.min(panes.indexOf(pane), remaining.length - 1)].id;
       }
     });
-    widget.onPaneRemoved(pane.id);
+    widget.onPaneRemoved(paneId);
   }
 
   /// Makes the clicked pane the target of F3 and highlights its border.
-  void _focusPane(int index) {
-    final paneId = _panes[index].id;
+  void _focusPane(int paneId) {
     if (_focusedPaneId == paneId) return;
     setState(() => _focusedPaneId = paneId);
   }
 
-  /// Adjusts the two panes around an inner boundary, preserving their total.
-  void _resizeBoundary(int boundaryIndex, double delta, double availableWidth) {
-    if (availableWidth <= 0 ||
-        boundaryIndex <= 0 ||
-        boundaryIndex >= _panes.length) {
-      return;
-    }
-    final leftIndex = boundaryIndex - 1;
-    final totalWeight = _weights.fold<double>(0, (sum, value) => sum + value);
-    final pairWeight = _weights[leftIndex] + _weights[boundaryIndex];
-    final pairWidth = availableWidth * pairWeight / totalWeight;
-    if (pairWidth <= 0) return;
-    final leftWidth = availableWidth * _weights[leftIndex] / totalWeight;
-    final minimum = math.min(160.0, pairWidth / 2);
-    final nextLeftWidth = (leftWidth + delta)
-        .clamp(minimum, pairWidth - minimum)
+  /// Adjusts a split while preserving its two children's combined extent.
+  void _resizeSplit(_PaneSplit split, double delta, double availableExtent) {
+    if (availableExtent <= 0) return;
+    final totalWeight = split.firstWeight + split.secondWeight;
+    final firstExtent = availableExtent * split.firstWeight / totalWeight;
+    final minimum = math.min(160.0, availableExtent / 2);
+    final nextFirstExtent = (firstExtent + delta)
+        .clamp(minimum, availableExtent - minimum)
         .toDouble();
-    final nextLeftWeight = pairWeight * nextLeftWidth / pairWidth;
+    final nextFirstWeight = totalWeight * nextFirstExtent / availableExtent;
     setState(() {
-      _weights[leftIndex] = nextLeftWeight;
-      _weights[boundaryIndex] = pairWeight - nextLeftWeight;
+      split.firstWeight = nextFirstWeight;
+      split.secondWeight = totalWeight - nextFirstWeight;
     });
   }
 
-  /// Opens the actions that apply to the pane boundary at [globalPosition].
-  Future<void> _showBoundaryMenu(
-    int boundaryIndex,
-    Offset globalPosition,
-  ) async {
-    final overlay = Overlay.of(context).context.findRenderObject();
-    if (overlay is! RenderBox) return;
-    final localPosition = overlay.globalToLocal(globalPosition);
-    final menuPosition = RelativeRect.fromLTRB(
-      localPosition.dx,
-      localPosition.dy,
-      overlay.size.width - localPosition.dx,
-      overlay.size.height - localPosition.dy,
-    );
-    final theme = Theme.of(context);
-    final action = await showMenu<_BoundaryAction>(
-      context: context,
-      position: menuPosition,
-      color: theme.colorScheme.surfaceContainerHigh,
-      items: [
-        PopupMenuItem(
-          value: _BoundaryAction.addPane,
-          child: HelpTarget(
-            topic: HelpTopics.paneBoundary,
-            child: Text(
-              boundaryIndex == 0
-                  ? 'Add pane to the left'
-                  : boundaryIndex == _panes.length
-                  ? 'Add pane to the right'
-                  : 'Add pane between panes',
-            ),
-          ),
-        ),
-        if (boundaryIndex > 0)
-          PopupMenuItem(
-            value: _BoundaryAction.deleteLeftPane,
-            child: HelpTarget(
-              topic: HelpTopics.paneBoundary,
-              child: const Text('Delete left pane'),
-            ),
-          ),
-        if (boundaryIndex < _panes.length)
-          PopupMenuItem(
-            value: _BoundaryAction.deleteRightPane,
-            child: HelpTarget(
-              topic: HelpTopics.paneBoundary,
-              child: const Text('Delete right pane'),
-            ),
-          ),
-      ],
-    );
-    if (!mounted || action == null) return;
-    switch (action) {
-      case _BoundaryAction.addPane:
-        _insertPane(boundaryIndex);
-        break;
-      case _BoundaryAction.deleteLeftPane:
-        _removePaneAt(boundaryIndex - 1);
-        break;
-      case _BoundaryAction.deleteRightPane:
-        _removePaneAt(boundaryIndex);
-        break;
-    }
-  }
-
-  /// Builds the empty action or a row of bounded panes and boundary targets.
+  /// Builds the nested split tree within the available workspace.
   @override
-  Widget build(BuildContext context) {
-    if (_panes.isEmpty) {
-      final theme = Theme.of(context);
-      return Center(
-        child: HelpTarget(
-          topic: HelpTopics.openCanvasPane,
-          child: FilledButton.icon(
-            onPressed: () => _insertPane(0),
-            icon: const Icon(Icons.brush_outlined),
-            label: const Text('Open Canvas Pane'),
-            style: FilledButton.styleFrom(
-              backgroundColor: theme.colorScheme.primary,
-              foregroundColor: theme.colorScheme.onPrimary,
-              minimumSize: Size(224, TouchTargetSettings.height(context)),
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-            ),
-          ),
-        ),
-      );
-    }
+  Widget build(BuildContext context) => _buildNode(context, _layout);
 
+  /// Builds one leaf pane or recursively lays out both children of a split.
+  Widget _buildNode(BuildContext context, _LayoutNode node) {
+    if (node is _Pane) return _buildPane(context, node);
+    final split = node as _PaneSplit;
     return LayoutBuilder(
       builder: (context, constraints) {
-        const outerBoundaryWidth = 10.0;
-        const innerBoundaryWidth = 16.0;
-        final availableWidth = math.max(
-          0.0,
-          constraints.maxWidth -
-              outerBoundaryWidth * 2 -
-              innerBoundaryWidth * (_panes.length - 1),
+        const dividerExtent = 8.0;
+        final extent = split.axis == Axis.horizontal
+            ? constraints.maxWidth
+            : constraints.maxHeight;
+        final available = math.max(0.0, extent - dividerExtent);
+        final firstFlex = math.max(1, (split.firstWeight * 1000).round());
+        final secondFlex = math.max(1, (split.secondWeight * 1000).round());
+        final first = Expanded(
+          flex: firstFlex,
+          child: _buildNode(context, split.first),
         );
-        return Row(
-          children: [
-            _buildBoundary(0, availableWidth, outerBoundaryWidth),
-            for (var index = 0; index < _panes.length; index++) ...[
-              Expanded(
-                flex: math.max(1, (_weights[index] * 1000).round()),
-                child: _buildPane(index),
-              ),
-              _buildBoundary(
-                index + 1,
-                availableWidth,
-                index == _panes.length - 1
-                    ? outerBoundaryWidth
-                    : innerBoundaryWidth,
-              ),
-            ],
-          ],
+        final second = Expanded(
+          flex: secondFlex,
+          child: _buildNode(context, split.second),
         );
+        final divider = _buildDivider(split, available);
+        return split.axis == Axis.horizontal
+            ? Row(children: [first, divider, second])
+            : Column(children: [first, divider, second]);
       },
     );
   }
 
-  /// Builds one rounded pane and routes secondary clicks on its side borders.
-  Widget _buildPane(int index) {
-    final pane = _panes[index];
-    final canvasIndex = _panes.indexWhere(
+  /// Builds a bordered pane and its local type/split/close controls.
+  Widget _buildPane(BuildContext context, _Pane pane) {
+    final canvas = _panes.where(
       (candidate) => candidate.kind == PaneKind.canvas,
     );
+    final firstCanvas = canvas.isEmpty ? null : canvas.first.id;
     final descriptor = PaneDescriptor(
       id: pane.id,
       kind: pane.kind,
-      canvasPaneId: canvasIndex < 0 ? null : _panes[canvasIndex].id,
+      canvasPaneId: firstCanvas,
     );
     final theme = Theme.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) => GestureDetector(
-        onSecondaryTapDown: (details) {
-          if (details.localPosition.dx <= 12) {
-            _showBoundaryMenu(index, details.globalPosition);
-          } else if (details.localPosition.dx >= constraints.maxWidth - 12) {
-            _showBoundaryMenu(index + 1, details.globalPosition);
-          }
-        },
-        child: Listener(
-          key: ValueKey('pane-${pane.id}'),
-          onPointerDown: (_) => _focusPane(index),
-          child: Container(
-            key: ValueKey('pane-frame-${pane.id}'),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: pane.id == _focusedPaneId
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.outline,
-                width: 1.5,
-              ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6.5),
-              child: Column(
-                children: [
-                  _buildHeader(context, index),
-                  Expanded(child: widget.contentBuilder(context, descriptor)),
-                ],
-              ),
-            ),
+    return Listener(
+      key: ValueKey('pane-${pane.id}'),
+      onPointerDown: (_) => _focusPane(pane.id),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: pane.id == _focusedPaneId
+                ? theme.colorScheme.primary
+                : theme.dividerColor,
+            width: 1,
           ),
+        ),
+        child: Column(
+          children: [
+            _buildHeader(context, pane),
+            Expanded(child: widget.contentBuilder(context, descriptor)),
+          ],
         ),
       ),
     );
   }
 
-  /// Builds a visible, compactable mode selector at the top of each pane.
-  Widget _buildHeader(BuildContext context, int index) {
-    final pane = _panes[index];
+  /// Builds the visible pane-mode selector and pane-local split/close actions.
+  Widget _buildHeader(BuildContext context, _Pane pane) {
     final theme = Theme.of(context);
-    final modeLabel = Text(
-      'Pane Mode',
-      style: theme.textTheme.labelLarge?.copyWith(
-        color: theme.colorScheme.onSurface,
+    final scheme = theme.colorScheme;
+    final height = TouchTargetSettings.height(context);
+    final paneCount = _panes.length;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
-    );
-    final modeSelector = HelpTarget(
-      topic: HelpTopics.paneType,
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<PaneKind>(
-          key: ValueKey('pane-mode-${pane.id}'),
-          value: pane.kind,
-          isExpanded: true,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurface,
-          ),
-          iconEnabledColor: theme.colorScheme.onSurface,
-          items: [
-            for (final kind in PaneKind.values)
-              DropdownMenuItem(
-                value: kind,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(kind.icon, size: 18),
-                    const SizedBox(width: 8),
-                    Text(kind.label),
-                  ],
+      child: SizedBox(
+        height: height,
+        child: Row(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: HelpTarget(
+                  topic: HelpTopics.paneType,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      border: Border.all(color: scheme.primary),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<PaneKind>(
+                        key: ValueKey('pane-mode-${pane.id}'),
+                        value: pane.kind,
+                        isExpanded: true,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: scheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        iconEnabledColor: scheme.onPrimaryContainer,
+                        dropdownColor: scheme.surface,
+                        borderRadius: BorderRadius.circular(4),
+                        items: [
+                          for (final kind in PaneKind.values)
+                            DropdownMenuItem(
+                              value: kind,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(kind.icon, size: 18),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      kind.label,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                        selectedItemBuilder: (context) => [
+                          for (final kind in PaneKind.values)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(kind.icon, size: 14),
+                                const SizedBox(width: 2),
+                                Flexible(
+                                  child: Text(
+                                    kind.label,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                        onChanged: (kind) {
+                          if (kind != null) _setPaneKind(pane.id, kind);
+                        },
+                      ),
+                    ),
+                  ),
                 ),
               ),
-          ],
-          selectedItemBuilder: (context) => [
-            for (final kind in PaneKind.values)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(kind.icon, size: 18),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(kind.label, overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-              ),
-          ],
-          onChanged: (kind) {
-            if (kind != null) _setPaneKind(index, kind);
-          },
-        ),
-      ),
-    );
-
-    return DecoratedBox(
-      key: ValueKey('pane-header-${pane.id}'),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh,
-        border: Border(
-          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
-        ),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 250;
-          return SizedBox(
-            height: TouchTargetSettings.height(context) + (compact ? 24 : 0),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: compact ? 2 : 0,
-              ),
-              child: compact
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        modeLabel,
-                        Expanded(child: modeSelector),
-                      ],
-                    )
-                  : Row(
-                      children: [
-                        modeLabel,
-                        const SizedBox(width: 8),
-                        Expanded(child: modeSelector),
-                      ],
-                    ),
             ),
-          );
-        },
+            const SizedBox(width: 4),
+            Flexible(
+              child: HelpTarget(
+                topic: HelpTopics.splitPane,
+                child: PopupMenuButton<Axis>(
+                  key: ValueKey('split-menu-${pane.id}'),
+                  padding: EdgeInsets.zero,
+                  onSelected: (axis) => _splitPane(pane.id, axis: axis),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: Axis.horizontal,
+                      child: Text('Side by side'),
+                    ),
+                    PopupMenuItem(
+                      value: Axis.vertical,
+                      child: Text('Top and bottom'),
+                    ),
+                  ],
+                  child: Material(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(4),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: height),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.call_split,
+                              size: 18,
+                              color: scheme.onPrimary,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Split',
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: scheme.onPrimary),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (paneCount > 1) ...[
+              const SizedBox(width: 4),
+              Flexible(
+                child: PainterActionButton(
+                  icon: Icons.close,
+                  label: 'Close',
+                  topic: HelpTopics.closePane,
+                  onPressed: () => _closePane(pane.id),
+                  minimumHeight: height,
+                ),
+              ),
+            ],
+            const SizedBox(width: 4),
+          ],
+        ),
       ),
     );
   }
 
-  /// Provides a resize handle and right-click menu at each pane boundary.
-  Widget _buildBoundary(
-    int boundaryIndex,
-    double availableWidth,
-    double width,
-  ) {
-    final inner = boundaryIndex > 0 && boundaryIndex < _panes.length;
-    final theme = Theme.of(context);
+  /// Provides an axis-appropriate drag target for a split divider.
+  Widget _buildDivider(_PaneSplit split, double availableExtent) {
+    final isSideBySide = split.axis == Axis.horizontal;
     return HelpTarget(
       topic: HelpTopics.paneBoundary,
       child: MouseRegion(
-        cursor: inner
+        cursor: isSideBySide
             ? SystemMouseCursors.resizeColumn
-            : SystemMouseCursors.basic,
+            : SystemMouseCursors.resizeRow,
         child: GestureDetector(
-          key: ValueKey('pane-boundary-$boundaryIndex'),
           behavior: HitTestBehavior.opaque,
-          onHorizontalDragUpdate: inner
-              ? (details) => _resizeBoundary(
-                  boundaryIndex,
-                  details.delta.dx,
-                  availableWidth,
-                )
+          onHorizontalDragUpdate: isSideBySide
+              ? (details) =>
+                    _resizeSplit(split, details.delta.dx, availableExtent)
               : null,
-          onSecondaryTapDown: (details) =>
-              _showBoundaryMenu(boundaryIndex, details.globalPosition),
+          onVerticalDragUpdate: isSideBySide
+              ? null
+              : (details) =>
+                    _resizeSplit(split, details.delta.dy, availableExtent),
           child: Semantics(
-            label: inner ? 'Resize pane boundary' : 'Pane boundary menu',
+            label: 'Resize pane boundary',
             child: SizedBox(
-              width: width,
+              width: isSideBySide ? 8 : double.infinity,
+              height: isSideBySide ? double.infinity : 8,
               child: Center(
                 child: Container(
-                  width: inner ? 4 : 1.5,
-                  height: inner ? 40 : 36,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.outline,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+                  width: isSideBySide ? 1 : double.infinity,
+                  height: isSideBySide ? double.infinity : 1,
+                  color: Theme.of(context).dividerColor,
                 ),
               ),
             ),
@@ -502,12 +440,71 @@ class PaneSystemState extends State<PaneSystem> {
   }
 }
 
-enum _BoundaryAction { addPane, deleteLeftPane, deleteRightPane }
+/// Finds leaves in visual order, which also defines the Diagnostics source.
+Iterable<_Pane> _leafPanes(_LayoutNode node) sync* {
+  if (node is _Pane) {
+    yield node;
+  } else {
+    final split = node as _PaneSplit;
+    yield* _leafPanes(split.first);
+    yield* _leafPanes(split.second);
+  }
+}
+
+/// Finds one pane by its stable identity.
+_Pane? _findPane(_LayoutNode node, int paneId) {
+  if (node is _Pane) return node.id == paneId ? node : null;
+  final split = node as _PaneSplit;
+  return _findPane(split.first, paneId) ?? _findPane(split.second, paneId);
+}
+
+/// Replaces one leaf with a split while retaining the leaf as its first child.
+_LayoutNode _replacePane(_LayoutNode node, int paneId, _PaneSplit replacement) {
+  if (node is _Pane) return node.id == paneId ? replacement : node;
+  final split = node as _PaneSplit;
+  split.first = _replacePane(split.first, paneId, replacement);
+  split.second = _replacePane(split.second, paneId, replacement);
+  return split;
+}
+
+/// Removes a leaf, returning null for that branch so its parent can collapse.
+_LayoutNode? _removePane(_LayoutNode node, int paneId) {
+  if (node is _Pane) return node.id == paneId ? null : node;
+  final split = node as _PaneSplit;
+  if (split.first is _Pane && (split.first as _Pane).id == paneId) {
+    return split.second;
+  }
+  if (split.second is _Pane && (split.second as _Pane).id == paneId) {
+    return split.first;
+  }
+  final first = _removePane(split.first, paneId);
+  if (first == null) return split.second;
+  final second = _removePane(split.second, paneId);
+  if (second == null) return first;
+  split
+    ..first = first
+    ..second = second;
+  return split;
+}
+
+/// A pane or split node in the runtime-only binary layout tree.
+abstract class _LayoutNode {}
 
 /// Mutable kind attached to a stable pane id.
-class _Pane {
+class _Pane extends _LayoutNode {
   _Pane({required this.id, required this.kind});
 
   final int id;
   PaneKind kind;
+}
+
+/// Two children arranged on one axis with independently resizable weights.
+class _PaneSplit extends _LayoutNode {
+  _PaneSplit({required this.axis, required this.first, required this.second});
+
+  final Axis axis;
+  _LayoutNode first;
+  _LayoutNode second;
+  double firstWeight = 1;
+  double secondWeight = 1;
 }
