@@ -27,6 +27,33 @@ Future<void> _pumpSettingsPane(
 }
 
 void main() {
+  testWidgets('long theme names fit in a narrow Settings pane', (tester) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final theme = PainterSettings.gruvboxLight.copyWith(
+      id: 'custom-long-name',
+      name:
+          'CopperPaletteCustomNameThatIsMuchTooLongToFitInTheSettingsDropdown',
+    );
+    final settings = PainterSettings.defaults.copyWith(
+      lightThemeId: theme.id,
+      customThemes: [theme],
+    );
+    await _pumpSettingsPane(
+      tester,
+      PainterSettingsController(initial: settings),
+    );
+
+    final selector = find.byKey(const ValueKey('theme-select-light'));
+    expect(
+      tester.getSize(find.text(theme.name).first).width,
+      lessThanOrEqualTo(tester.getSize(selector).width),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('changing theme mode updates and persists settings', (
     tester,
   ) async {

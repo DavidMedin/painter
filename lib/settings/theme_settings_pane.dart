@@ -176,13 +176,18 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                 topic: HelpTopics.themePalette,
                 child: DropdownButtonFormField<String>(
                   key: ValueKey('theme-select-${brightness.name}'),
+                  isExpanded: true,
                   initialValue: selectedId,
                   decoration: InputDecoration(labelText: label),
                   items: [
                     for (final theme in themes)
                       DropdownMenuItem(
                         value: theme.id,
-                        child: Text(theme.name),
+                        child: Text(
+                          theme.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                   ],
                   onChanged: (id) {

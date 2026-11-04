@@ -152,3 +152,16 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
   `build/macos/Build/Products/Release/painter.app` (43.3 MB). Xcode logged the
   `Any Mac` placeholder OS-version warning; the build succeeded.
 - No GUI window was opened or visually inspected for this change, per [testing.md](testing.md). This does not change T-005's separate visual-verification blocker.
+
+## Settings Palette Dropdown Overflow Fix
+
+- Palette selectors now expand within their available width and truncate long
+  custom theme names with an ellipsis instead of overflowing the selector.
+- The narrow-pane regression failed before the fix: its selected custom-theme
+  label measured 1065.9 logical pixels against a 55-pixel selector. It passes
+  with the expanded selector and checks that the label fits and layout reports
+  no rendering exception.
+- `flutter test` — passed all 98 tests on the stacked tree.
+- `flutter analyze` — passed: `No issues found!`.
+- No GUI window was opened; the changed settings layout was verified headlessly,
+  per [testing.md](testing.md).
