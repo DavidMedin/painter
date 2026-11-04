@@ -30,7 +30,7 @@ CanvasController _controller() {
   return controller;
 }
 
-/// Commits one two-point full-pressure stroke from [a] to [b].
+/// Commits a full-pressure pointer gesture from [a] to [b].
 void _stroke(CanvasController c, Offset a, Offset b) {
   c.beginStroke(a, 1);
   c.extendStroke(b, 1);
@@ -334,7 +334,7 @@ void main() {
       'invalidateAll empties the cache and rebuilds from the document',
       () async {
         final c = _controller();
-        _stroke(c, const Offset(20, 20), const Offset(180, 20));
+        _stroke(c, const Offset(20, 20), const Offset(60, 20));
         final renderer = _renderer();
         await _settle(renderer, c.document);
         expect(renderer.cache.cachedTiles, 1);
@@ -354,7 +354,7 @@ void main() {
 
     test('describeTiles reports built, queued, and stale tiles', () async {
       final c = _controller();
-      _stroke(c, const Offset(20, 20), const Offset(180, 20));
+      _stroke(c, const Offset(20, 20), const Offset(60, 20));
       final renderer = _renderer();
       await _settle(renderer, c.document);
 
@@ -364,7 +364,7 @@ void main() {
       expect(tiles.single.current, isTrue);
       expect(tiles.single.appliedStrokes, 1);
 
-      _stroke(c, const Offset(20, 30), const Offset(180, 30));
+      _stroke(c, const Offset(20, 30), const Offset(60, 30));
       tiles = renderer.cache.describeTiles();
       expect(tiles.single.current, isFalse);
     });

@@ -26,15 +26,16 @@ import 'package:flutter/material.dart';
 //   2. Viewport (`CanvasController.pan/zoom/rotation`): how the document is
 //      looked at. Never saved, never part of the document; opening a file
 //      resets it (`replaceDocument`), and `resetViewport` resets it alone.
-//   3. Active stroke (`CanvasController.activePoints`): the stroke being drawn
-//      right now. It is not in the document until `endStroke` commits it.
+//   3. Active chunk (`CanvasController.activePoints`): the bounded tail of the
+//      pointer gesture being drawn right now. Completed chunks are appended to
+//      the document as immutable strokes, allowing TileCache to rasterize the
+//      trail while the latest chunk remains live.
 //
 // Why this split: document coordinates must not depend on the viewport
 // (ADR 0001), so panning, zooming and rotating never touch the document and
-// the tile cache (tile_cache.dart) stays valid across them. Keeping the
-// active stroke out of the document means the document only ever grows by
-// whole strokes, which is what lets `TileCache` track "strokes [0, n) are
-// already drawn into this tile" (`CachedTile.appliedStrokes`).
+// the tile cache (tile_cache.dart) stays valid across them. Bounded chunks let
+// TileCache advance its per-tile `CachedTile.appliedStrokes` count while a
+// pointer gesture continues, instead of keeping its entire splat batch live.
 //
 // Why strokes are immutable: tiles, splat buffers (`SplatWorker`) and
 // bounds are derived from a stroke once and reused for the session. A stroke
@@ -47,9 +48,9 @@ import 'package:flutter/material.dart';
 // so strokes tracing the same path still get different specks. The seed is
 // not saved: `fromJson` re-derives it from stroke order, which equals the
 // order they were drawn, so a saved-and-reopened document looks the same
-// (ADR 0005). The active stroke borrows `CanvasDocument.nextSeed`, so its
-// grain does not change when `endStroke` commits it. Deleting or reordering
-// strokes, if ever added, would change seeds and would need a persisted id.
+// (ADR 0005). Active chunks borrow `CanvasDocument.nextSeed`, so each chunk's
+// grain stays stable when committed. Long pointer gestures therefore consist
+// of several independently seeded document strokes.
 //
 // Why `ChangeNotifier` and no state-management package: the whole state is
 // one object with a handful of mutators; widgets and painters just listen
@@ -147,9 +148,9 @@ class CanvasDocument {
   void _addStroke(CanvasStroke stroke) => _strokes.add(stroke);
 
   /// Seed the next appended stroke will receive (1-based, so the first stroke
-  /// is 1). `CanvasController.endStroke` uses it for the committed stroke and
-  /// `TiledRenderer._paintActive` uses it for the in-progress stroke; they must
-  /// agree so the grain is identical before and after pointer-up.
+  /// is 1). `CanvasController._commitActiveChunk` uses it for the committed
+  /// chunk and `TiledRenderer._paintActive` uses it for the live chunk; they
+  /// agree so grain stays stable when that chunk is committed.
   int get nextSeed => _strokes.length + 1;
 
   /// Format identifier stored in saved documents.
@@ -237,8 +238,8 @@ class CanvasDocument {
   }
 }
 
-/// Owns the document, the viewport and the active stroke, and is the only
-/// code that mutates them. Notifies listeners after every change.
+/// Owns the document, viewport, and active chunk; completed chunks from a
+/// pointer gesture are appended to the document. Notifies after every change.
 ///
 /// Coupled to `CanvasView`, which turns pointer events into calls to
 /// [beginStroke]/[extendStroke]/[endStroke], [panBy], [zoomAt] and [rotateAt],
@@ -256,17 +257,26 @@ class CanvasController extends ChangeNotifier {
   static const double minimumZoom = 0.1;
   static const double maximumZoom = 16;
 
+  /// Maximum accumulated document-space path length in a live chunk. Longer
+  /// pointer segments are interpolated and committed through `TileCache`.
+  static const double activeStrokeChunkLength = 64;
+
+  /// Maximum sampled points in a live chunk, bounding repeated zero-distance
+  /// pointer events as well as the geometric chunk length above.
+  static const int activeStrokeChunkPoints = 64;
+
   CanvasDocument _document = CanvasDocument.empty();
   List<CanvasPoint> _activePoints = [];
   List<CanvasPoint> _activeView = const [];
+  double _activeLength = 0;
   Offset _pan = Offset.zero;
   double _zoom = 1;
   double _rotation = 0;
 
   CanvasDocument get document => _document;
 
-  /// The in-progress stroke's points. The same read-only view instance is
-  /// returned (and grows) for the whole stroke; a new stroke yields a new one.
+  /// The current bounded chunk's points. The read-only view grows until a
+  /// chunk is appended to the document, then a new view starts at its endpoint.
   List<CanvasPoint> get activePoints => _activeView;
 
   Offset get pan => _pan;
@@ -285,6 +295,7 @@ class CanvasController extends ChangeNotifier {
   void replaceDocument(CanvasDocument document) {
     _document = document;
     _setActive([]);
+    _activeLength = 0;
     _pan = Offset.zero;
     _zoom = 1;
     _rotation = 0;
@@ -299,32 +310,74 @@ class CanvasController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Starts a new active stroke at document-space [position]; [weight] is
+  /// Starts a new active chunk at document-space [position]; [weight] is
   /// clamped to 0.05-1. Called on pointer-down by `CanvasView._onPointerDown`.
   void beginStroke(Offset position, double weight) {
     _setActive([CanvasPoint(position: position, weight: _clampWeight(weight))]);
+    _activeLength = 0;
     notifyListeners();
   }
 
-  /// Appends a point to the active stroke; a no-op when no stroke is active.
-  /// The active list is mutated in place and [activePoints] is a live view of
-  /// it, so `SplatStream.extend` can consume only the new tail.
+  /// Appends [position] to the active chunk, committing full chunks as
+  /// immutable document strokes so the tile cache can rasterize them during a
+  /// long pointer gesture. Long input segments are interpolated at chunk
+  /// boundaries. The active list is mutated in place between chunk commits, so
+  /// `SplatStream.extend` consumes only newly appended points.
   void extendStroke(Offset position, double weight) {
     if (_activePoints.isEmpty) return;
-    _activePoints.add(
-      CanvasPoint(position: position, weight: _clampWeight(weight)),
+    final target = CanvasPoint(
+      position: position,
+      weight: _clampWeight(weight),
     );
+    var from = _activePoints.last;
+    while (true) {
+      if (_activePoints.length >= activeStrokeChunkPoints ||
+          _activeLength >= activeStrokeChunkLength) {
+        _commitActiveChunk();
+        _setActive([from]);
+        _activeLength = 0;
+      }
+
+      final delta = target.position - from.position;
+      final distance = delta.distance;
+      if (distance == 0) {
+        _activePoints.add(target);
+        break;
+      }
+
+      final remaining = activeStrokeChunkLength - _activeLength;
+      final step = distance < remaining ? distance : remaining;
+      final ratio = step / distance;
+      final next = CanvasPoint(
+        position: from.position + delta * ratio,
+        weight: from.weight + (target.weight - from.weight) * ratio,
+      );
+      _activePoints.add(next);
+      _activeLength += step;
+      from = next;
+      if (step == distance) break;
+
+      _commitActiveChunk();
+      _setActive([from]);
+      _activeLength = 0;
+    }
     notifyListeners();
   }
 
-  /// Commits the active stroke to the document with seed
-  /// `CanvasDocument.nextSeed`, then clears the active stroke. Called from
-  /// `CanvasView._finishPointer`.
+  /// Commits the final active chunk to the document, then clears it. Earlier
+  /// chunks from the same pointer gesture are already in the document. Called
+  /// from `CanvasView._finishPointer`.
   void endStroke() {
     if (_activePoints.isEmpty) return;
-    _document._addStroke(CanvasStroke(_activePoints, seed: _document.nextSeed));
+    _commitActiveChunk();
     _setActive([]);
+    _activeLength = 0;
     notifyListeners();
+  }
+
+  /// Appends the immutable active chunk with the next document seed.
+  void _commitActiveChunk() {
+    _document._addStroke(CanvasStroke(_activePoints, seed: _document.nextSeed));
   }
 
   /// Maps a screen (widget-local) position to document space by undoing the

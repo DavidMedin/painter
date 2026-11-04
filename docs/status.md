@@ -114,3 +114,11 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 - Procedural illustration request: `node docs/brush-illustrations/generate.mjs` generated four deterministic SVG comparison swatches (granular pencil versus uniform mark; intersected tip masks versus two brush outputs; clone versus RGB smudge; conceptual wet-front reach versus independent dabs). A repeat run produced identical SHA-256 hashes. The swatches are illustrative vectors, not AI imagery, Painter rendering, or physical simulation output.
 - `typst compile docs/brush-node-graph-routes.typ docs/brush-node-graph-routes.pdf` — passed with all four figures in a 15-page A4 PDF. `pdftotext -layout` found labels and captions on pages 13–15; `pdftoppm -f 13 -l 15 -r 72` rasterized the figure pages, and sampled left/right regions contained distinct drawn pixels. Word bounds stayed inside the page on all 15 pages. The image-question tool returned 404, and the active model cannot inspect screenshots; aesthetic quality was not manually certified.
 - No app behavior, Dart source, document format, or roadmap task state changed; Flutter tests and macOS GUI checks do not exercise this documentation-only report.
+
+## Bounded Active Stroke Chunks Verification (canvas, out-of-roadmap enhancement)
+
+- Direct user request: keep long gestures responsive by committing completed bounded chunks through `CanvasDocument` and `TileCache`, while only the latest chunk remains live. Implemented on branch `feature/stroke-trail-cache`; see [ADR 0009](decisions/0009-bounded-active-stroke-chunks.md). Each gesture is stored as ordinary `CanvasStroke` chunks; the saved-document format is unchanged.
+- `flutter analyze` — passed: `No issues found!`.
+- `flutter test` — passed all 90 tests, including synthetic long mouse gestures, bounded controller chunks, and offscreen rendering of the cached trail while the gesture remains active.
+- Not verified: drawing in the running macOS window, physical stylus behavior, or hardware latency; verification used synthetic Flutter input and offscreen rendering.
+

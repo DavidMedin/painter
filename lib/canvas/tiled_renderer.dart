@@ -1,15 +1,15 @@
 // What: TiledRenderer, the per-frame painter of the document. Each frame it
-// draws the visible tiles from TileCache, falls back to other resolutions for
-// tiles that are not ready, classifies how every tile was drawn for the debug
-// stats, and draws the in-progress stroke live. It also builds the gaussian
-// sprite that every splat samples.
+// draws visible tiles from TileCache, falls back to other resolutions for
+// tiles that are not ready, classifies them for debug stats, and draws the
+// current in-progress chunk live. It also builds the gaussian sprite that
+// every splat samples.
 // Why: painting has to be fast and must never wait on rasterization, so the
-// slow work lives in tile_cache.dart and this file only reads what is cached
-// and asks for what is missing. It owns the sprite, the cache and the
-// active-stroke stream because those share one lifetime (docs/decisions/
-// 0005-tiled-texture-cache.md; it replaced the old PencilRenderer). The
-// system overview, including how this file and tile_cache.dart, tile_grid.dart
-// and tile_stats.dart divide the work, is in tile_cache.dart.
+// slow work lives in tile_cache.dart and this file only reads cached content
+// and asks for what is missing. It owns the sprite, cache, and active-chunk
+// stream because those share one lifetime (docs/decisions/0005-tiled-texture-
+// cache.md; it replaced the old PencilRenderer). The system overview,
+// including how this file and tile_cache.dart, tile_grid.dart and tile_stats.dart
+// divide the work, is in tile_cache.dart.
 
 import 'dart:collection';
 import 'dart:math' as math;
@@ -24,7 +24,7 @@ import 'tile_cache.dart';
 import 'tile_grid.dart';
 import 'tile_stats.dart';
 
-/// Paints the document from cached tiles and the in-progress stroke live.
+/// Paints cached tiles and the current in-progress chunk live.
 ///
 /// Per frame this draws a bounded number of tile images (only those visible)
 /// instead of replaying every stroke, so frame cost tracks screen area, not
@@ -41,13 +41,12 @@ class TiledRenderer {
   }
 
   /// The gaussian sprite every splat samples, shared with [cache] and the
-  /// active stroke. Its size must match `PencilSplats.spritePixels`.
+  /// active chunk. Its size must match `PencilSplats.spritePixels`.
   final ui.Image sprite;
   late final TileCache cache;
 
-  // The in-progress stroke is not tiled; see _paintActive. The stream keeps
-  // the splats built so far, keyed by the seed and the identity of the point
-  // list it was fed from.
+  // The current live chunk is not tiled; see _paintActive. Its stream keeps
+  // splats generated so far, keyed by seed and source-list identity.
   SplatStream? _activeStream;
   List<CanvasPoint>? _activeSource;
   int _activeSeed = 0;
@@ -63,7 +62,7 @@ class TiledRenderer {
   /// Recent per-frame recording times in milliseconds, oldest first.
   final Queue<double> recordHistory = Queue<double>();
 
-  /// Paints [document] and the in-progress stroke into [canvas].
+  /// Paints [document] and the active chunk into [canvas].
   ///
   /// [canvas] must already carry the document-to-screen transform. [visible] is
   /// the document-space rectangle on screen and [pixelsPerUnit] the on-screen
@@ -75,7 +74,7 @@ class TiledRenderer {
   /// current, and record in [frame] how it was drawn; finally tell the cache
   /// which tiles were used ([TileCache.setWanted], which protects them from
   /// eviction and drops queued work for tiles no longer visible) and draw the
-  /// active stroke over the tiles. This method never builds or waits.
+  /// active chunk over the tiles. This method never builds or waits.
   ///
   /// Coupled to: [TileCache.attach], [TileCache.tile], [TileCache.isCurrent],
   /// [TileCache.request], [TileCache.setWanted]; [_drawTile], [_drawFallback],
@@ -242,16 +241,15 @@ class TiledRenderer {
     return TileDraw.missing;
   }
 
-  /// Draws the in-progress stroke straight from the splats of a [SplatStream]
-  /// (not through the tile cache), extending it with only the new points each
-  /// call. Tiles get the stroke later, when it is committed to the document.
+  /// Draws the current live chunk from its [SplatStream], extending it with
+  /// only the new points each call. Completed chunks enter the tile cache as
+  /// document strokes while the pointer gesture continues.
   ///
-  /// The stream is reset when no stroke is active, when the seed changes, or
-  /// when [active] is a different list instance:
-  /// `CanvasController.activePoints` returns a new list per stroke (ADR 0005),
-  /// so identity marks a new stroke. `CanvasDocument.nextSeed` equals the seed
-  /// (`CanvasStroke.seed`) the stroke gets on commit, which is why the grain
-  /// does not change at pointer-up.
+  /// The stream is reset when no chunk is active, when the seed changes, or
+  /// when [active] is a different list instance. `CanvasController.activePoints`
+  /// returns a new list when a chunk is committed, so identity marks rollover.
+  /// `CanvasDocument.nextSeed` equals the `CanvasStroke.seed` used on commit,
+  /// preserving that chunk's grain while it moves into the cache.
   void _paintActive(
     ui.Canvas canvas,
     CanvasDocument document,
@@ -262,8 +260,8 @@ class TiledRenderer {
       _activeSource = null;
       return;
     }
-    // The active stroke will become the next committed stroke; reuse its seed
-    // so the grain does not change on pointer-up. A new stroke is a new list.
+    // This chunk becomes the next committed stroke; reuse its seed so the
+    // grain does not change on commit. A rollover starts a new list and seed.
     final seed = document.nextSeed;
     var stream = _activeStream;
     if (stream == null ||

@@ -117,7 +117,7 @@ class TileFrameStats {
   /// Visible tiles that are built and known to contain no ink.
   int blank = 0;
 
-  /// Splats in the in-progress stroke.
+  /// Splats in the current in-progress chunk.
   int activeSplats = 0;
 
   /// Time spent recording the frame's draw calls on the UI thread (ms).

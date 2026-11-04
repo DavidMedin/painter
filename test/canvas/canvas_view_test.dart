@@ -1,17 +1,14 @@
 // What: Widget tests that feed synthetic pointer events straight into
-//   CanvasView and assert on the CanvasController: a mouse stroke's
-//   document-space points and fixed weight 1.0; a stylus stroke's
-//   pressure-to-weight mapping; and mouse pan (secondary button), wheel zoom
-//   anchored at the pointer, and middle-button rotation.
-// Why: T-003 acceptance (docs/status.md "T-003 Verification"; ADR 0001 for
-//   the controls and the prototype pressure mapping). Per ADR 0001 these
-//   tests assert document and viewport state, not raster output, and
-//   physical stylus hardware is not covered: the stylus is a synthetic
-//   PointerDeviceKind.stylus event.
+//   CanvasView and assert on CanvasController state: mouse drawing and fixed
+//   weight, bounded chunks during a long mouse gesture, stylus pressure, and
+//   mouse pan/zoom/rotation.
+// Why: T-003 acceptance covers canvas controls (ADR 0001); ADR 0009 adds the
+//   requirement that long gestures commit bounded chunks as they continue.
+//   These tests assert document and viewport state, not physical stylus input
+//   or raster output; stylus events are synthetic.
 // Covers: lib/canvas/canvas_view.dart (CanvasView input handling, _weightFor)
-//   and lib/canvas/canvas_controller.dart (CanvasController, toDocument /
-//   toScreen, CanvasDocument strokes). Trackpad gestures (ADR 0003) are not
-//   tested in this file.
+//   and lib/canvas/canvas_controller.dart (active chunks, CanvasDocument, and
+//   viewport transforms). Trackpad gestures (ADR 0003) are not tested here.
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -47,6 +44,35 @@ void main() {
     expect(stroke.points.first.position, start);
     expect(stroke.points.last.position, start + const Offset(20, 10));
     expect(stroke.points.map((point) => point.weight), everyElement(1));
+    controller.dispose();
+  });
+
+  testWidgets('long mouse gestures commit bounded chunks while drawing', (
+    tester,
+  ) async {
+    final controller = await _pumpCanvas(tester);
+    final size = tester.getSize(find.byType(CanvasView));
+    final start = Offset(size.width / 2 - 300, size.height / 2);
+    final end = start + const Offset(600, 0);
+    final mouse = TestPointer(7, PointerDeviceKind.mouse);
+
+    await tester.sendEventToBinding(
+      mouse.down(start, buttons: kPrimaryMouseButton),
+    );
+    await tester.sendEventToBinding(
+      mouse.move(end, buttons: kPrimaryMouseButton),
+    );
+
+    expect(controller.document.strokeCount, greaterThan(1));
+    expect(
+      controller.activePoints.length,
+      lessThanOrEqualTo(CanvasController.activeStrokeChunkPoints),
+    );
+    expect(controller.activePoints.last.position, end);
+
+    await tester.sendEventToBinding(mouse.up());
+    expect(controller.activePoints, isEmpty);
+    expect(controller.document.strokes.last.points.last.position, end);
     controller.dispose();
   });
 
@@ -160,4 +186,3 @@ Future<CanvasController> _pumpCanvas(WidgetTester tester) async {
   );
   return controller;
 }
-

@@ -49,17 +49,17 @@ import 'canvas_controller.dart';
 //   - Why determinism and prefix stability matter: a splat near a tile edge
 //     is drawn into both neighbouring tiles and must be identical in each or a
 //     seam shows; a tile rebuilt after eviction must reproduce the same
-//     specks; and the in-progress stroke, grown incrementally on the UI
-//     isolate, must look the same once committed (ADR 0005). Seeds come from
-//     `CanvasStroke.seed` (see the overview in canvas_controller.dart).
-//   - Two consumers. Committed strokes: `TileCache._splatsFor` asks
+//     specks; and each live chunk must look the same when committed (ADR 0005).
+//     Seeds come from `CanvasStroke.seed` (see the overview in
+//     canvas_controller.dart).
+//   - Two consumers. Committed chunks: `TileCache._splatsFor` asks
 //     `SplatWorker.generate` (splat_worker.dart), whose isolate runs
 //     `PencilSplats.build` and returns `StrokeSplats`; `TileCache._build`
 //     draws them into tile pictures. The splats are document-space, so one
-//     generation serves every tile and level of detail. The active stroke:
-//     `TiledRenderer._paintActive` keeps a `SplatStream` on the UI isolate and
-//     extends it by the new points each paint, so a pointer move costs time
-//     proportional to the new points, not the stroke length.
+//     generation serves every tile and level of detail. The active chunk is
+//     drawn live by `TiledRenderer._paintActive`, which extends a `SplatStream`
+//     with new points. Completed chunks enter `CanvasDocument` and are
+//     rasterized by `TileCache` during a long gesture.
 //   - Isolate boundary: points go to the worker as a flat Float64List
 //     (x, y, weight per point) and the buffers come back as
 //     `TransferableTypedData`; no per-point objects are copied.
@@ -182,10 +182,11 @@ class PencilSplats {
 /// extending only emits the samples contributed by the new points; the
 /// resulting buffers are identical to building the whole stroke at once.
 ///
-/// Used directly on the UI isolate for the in-progress stroke
-/// (`TiledRenderer._paintActive`); `PencilSplats.build` is one stream extended
-/// once. Splats are emitted sample by sample in order, so the stream only
-/// keeps the last point and counters, not the earlier points.
+/// Used directly on the UI isolate for the in-progress chunk
+/// (`TiledRenderer._paintActive`); `PencilSplats.build` runs one stream to
+/// completion for committed strokes and one-shot generation. Splats are
+/// emitted sample by sample in order, so the stream only keeps the last point
+/// and counters, not the earlier points.
 class SplatStream {
   SplatStream(this.strokeSeed);
 

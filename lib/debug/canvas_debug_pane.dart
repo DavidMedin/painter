@@ -209,7 +209,7 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
               '${r.frame.recordMillis.toStringAsFixed(3)} ms',
               color: _budget(r.frame.recordMillis),
             ),
-            ImValue('active stroke splats', '${r.frame.activeSplats}'),
+            ImValue('active chunk splats', '${r.frame.activeSplats}'),
             ImPlot(label: 'record ms', samples: r.recordHistory, unit: 'ms'),
           ],
         ),

@@ -19,8 +19,8 @@
 // levels for missing ones, and asks TileCache.request for what is missing or
 // stale. The cache builds tiles in the background (splats generated in a
 // worker isolate, rasterized with Picture.toImage), so a tile appears some
-// frames after it is first requested. The in-progress stroke is not tiled;
-// it is drawn live from a SplatStream.
+// frames after it is first requested. Only the current active chunk stays
+// live; completed chunks are ordinary document strokes in the tile cache.
 //
 // Strategy: offscreen rasterization plus pixel statistics. Each test records
 // the renderer into a PictureRecorder, rasterizes it to a small 200x40 image
@@ -231,6 +231,30 @@ void main() {
     expect(_red(bytes, _width - 4, 20), 255);
   });
 
+  test('a long live gesture caches its completed trail', () async {
+    final controller = CanvasController();
+    addTearDown(controller.dispose);
+    final renderer = _renderer();
+    controller.beginStroke(const Offset(20, 20), 1);
+    controller.extendStroke(const Offset(2000, 20), 1);
+
+    expect(controller.document.strokeCount, greaterThan(1));
+    final maxLiveSplats =
+        CanvasController.activeStrokeChunkPoints *
+        PencilSplats.splatsPerSample *
+        4;
+    final bytes = await _settled(
+      renderer,
+      controller.document,
+      active: controller.activePoints,
+    );
+    final tile = renderer.cache.tile(const TileKey(0, 0, 0))!;
+
+    expect(renderer.frame.activeSplats, lessThan(maxLiveSplats));
+    expect(tile.appliedStrokes, controller.document.strokeCount);
+    expect(_red(bytes, 100, 20), lessThan(255));
+  });
+
   test('lighter pressure marks fewer pixels than full pressure', () async {
     final light = _inked(
       await _settled(_renderer(), _documentOf([_horizontal(0.2)])),
@@ -243,12 +267,14 @@ void main() {
     expect(light, lessThan(full));
   });
 
-  // The live stroke is drawn from SplatStream with seed document.nextSeed,
-  // and the committed stroke has the same seed (CanvasStroke.seed, ADR
-  // 0005 "Stable seeds"), so the frames compare byte for byte. The committed
-  // frame comes from tiles, the drawing frame from the live stream.
+  // This short stroke stays within one chunk. Its live stream and committed
+  // tile use the same nextSeed (CanvasStroke.seed, ADR 0005), so the frames
+  // compare byte for byte.
   test('committing a stroke does not change its grain', () async {
-    final points = _horizontal(1);
+    final points = [
+      const CanvasPoint(position: Offset(80, 20), weight: 1),
+      const CanvasPoint(position: Offset(120, 20), weight: 1),
+    ];
     final renderer = _renderer();
 
     final drawing = await _frame(
@@ -348,10 +374,9 @@ void main() {
     expect(seam, greaterThan(neighbours * 0.6));
   });
 
-  // TileCache.appliedStrokes counts strokes already drawn into a tile; a new
-  // stroke is drawn over the old image (an incremental build) instead of the
-  // tile being rebuilt from all strokes. Asserts the counter reaches 2 and
-  // that ink from both the old and the new stroke is on screen.
+  // Each 160-unit gesture becomes three bounded document chunks. TileCache
+  // incrementally adds those chunks over the old image; both gestures must
+  // remain visible after the second update.
   test('adding a stroke updates a tile without redrawing old strokes', () async {
     final controller = CanvasController();
     addTearDown(controller.dispose);
@@ -362,7 +387,8 @@ void main() {
     controller.endStroke();
     await _settled(renderer, controller.document);
     final before = renderer.cache.tile(const TileKey(0, 0, 0))!;
-    expect(before.appliedStrokes, 1);
+    final firstGestureChunks = controller.document.strokeCount;
+    expect(before.appliedStrokes, firstGestureChunks);
 
     controller.beginStroke(const Offset(20, 28), 1);
     controller.extendStroke(const Offset(180, 28), 1);
@@ -370,7 +396,8 @@ void main() {
     final after = await _settled(renderer, controller.document);
     final tile = renderer.cache.tile(const TileKey(0, 0, 0))!;
 
-    expect(tile.appliedStrokes, 2);
+    expect(tile.appliedStrokes, controller.document.strokeCount);
+    expect(tile.appliedStrokes, greaterThan(firstGestureChunks));
     // Both strokes are visible: the first survived, the second was drawn over.
     double rowInk(int y) {
       var n = 0;
@@ -405,6 +432,7 @@ void main() {
     final immediately = await _frame(renderer, controller.document);
 
     expect(_inked(immediately), greaterThanOrEqualTo(_inked(settled)));
+    await _settled(renderer, controller.document);
   });
 
   // Pins the scaled-fallback path (TiledRenderer._drawFallback): at 4x

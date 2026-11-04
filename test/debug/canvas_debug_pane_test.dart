@@ -65,7 +65,7 @@ String _row(WidgetTester tester, String label) {
   return value.value;
 }
 
-/// Draws one short mouse stroke (120 x 30 units) in the canvas area to the
+/// Draws one short mouse stroke (40 x 10 units) in the canvas area to the
 /// right of the pane, so the press cannot land on the pane window, which is
 /// anchored at the top-left and is 340 wide (CanvasDebugPane). Uses synthetic
 /// mouse events through the binding, like the canvas tests.
@@ -79,7 +79,7 @@ Future<void> _drawStroke(WidgetTester tester) async {
     mouse.down(start, buttons: kPrimaryMouseButton),
   );
   await tester.sendEventToBinding(
-    mouse.move(start + const Offset(120, 30), buttons: kPrimaryMouseButton),
+    mouse.move(start + const Offset(40, 10), buttons: kPrimaryMouseButton),
   );
   await tester.sendEventToBinding(mouse.up());
   await tester.pump();
