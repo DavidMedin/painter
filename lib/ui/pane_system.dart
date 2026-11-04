@@ -3,21 +3,21 @@
 // Why: docs/project-brief.md requires modular panes with per-pane content
 //   selectors. A floating diagnostics overlay cannot provide independent
 //   side-by-side content; ADR 0010 records the docked layout decision.
-// Coupled to: main.dart (content builder and renderer ownership),
-//   contextual_help.dart (pane controls), and touch_target_settings.dart.
+// Coupled to: main.dart (content builder and renderer ownership), logging/
+//   (Log content mode), contextual_help.dart, and touch_target_settings.dart.
 //
 // ---------------------------------------------------------------------------
 // Pane-system overview
 //
 // Each pane has a stable identity and one implemented content kind: Canvas,
-// Diagnostics, or Settings. The first pane is a Canvas. Each top bar selects
-// its mode. Boundary menus add a Canvas pane beside a boundary or delete the
-// pane beside it; deleting the final pane shows an Open Canvas Pane action.
-// Inner boundaries resize their adjacent pair while preserving combined width.
-// F3 adds or removes Diagnostics beside the focused pane; if Diagnostics is
-// the only pane, F3 changes it to Canvas. Pane widths are runtime-only. The
-// owner builds content from PaneDescriptor and owns content-specific state;
-// this widget knows nothing about documents or drawing.
+// Diagnostics, Settings, or Log. The first pane is a Canvas. Each top bar
+// selects its mode. Boundary menus add a Canvas pane beside a boundary or
+// delete the pane beside it; deleting the final pane shows an Open Canvas Pane
+// action. Inner boundaries resize their adjacent pair while preserving
+// combined width. F3 adds or removes Diagnostics beside the focused pane; if
+// Diagnostics is the only pane, F3 changes it to Canvas. Pane widths are
+// runtime-only. The owner builds content from PaneDescriptor and owns content-
+// specific state; this widget knows nothing about documents or drawing.
 // ---------------------------------------------------------------------------
 
 import 'dart:math' as math;
@@ -31,7 +31,8 @@ import 'touch_target_settings.dart';
 enum PaneKind {
   canvas('Canvas', Icons.brush_outlined),
   diagnostics('Diagnostics', Icons.analytics_outlined),
-  settings('Settings', Icons.settings_outlined);
+  settings('Settings', Icons.settings_outlined),
+  log('Log', Icons.receipt_long_outlined);
 
   const PaneKind(this.label, this.icon);
 

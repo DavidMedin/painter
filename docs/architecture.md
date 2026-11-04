@@ -26,6 +26,12 @@
 - **Wiring:** `PainterApp` in `lib/main.dart` owns the current document path and in-flight file-operation state, and shows a details-expandable error dialog on failure without replacing the current document or crashing.
 - **Evidence and record:** because picking is ordinary Flutter UI, `flutter test` drives and verifies the full open/save flow headlessly, including the picker dialog itself (navigate, type a name, confirm, cancel); no native dialog, VM, or file-picker plugin dependency is required.
 
+## Application logging (T-008)
+
+- `PainterLog` in `lib/logging/` appends JSONL records to `~/Library/Logs/Painter/painter.log` on macOS. Each row contains a UTC timestamp, severity, message-catalog ID, formatting arguments, and optional stack trace; display and stdout prose is resolved by `LogMessages` rather than stored in the record.
+- `main.dart` opens one shared logger before loading settings, records settings-load and document-operation failures, and installs Flutter framework/platform error handlers. `--log-to-stdout` adds readable output without disabling file persistence. Fatal-error classification remains an open product question.
+- `LogStatusBar` and the selectable `LogPane` observe the same history. The pane preserves file order and scrolls to the newest row at the bottom. See [ADR 0012](decisions/0012-file-backed-logging.md).
+
 ## App settings and theming
 
 - `PainterSettings` and `PainterTheme` in `lib/settings/` define System/Light/Dark

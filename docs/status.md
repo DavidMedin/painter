@@ -1,10 +1,10 @@
 # Project Status
 
-- **Current state:** a runnable macOS Flutter app with the first painting workflow, in-house Open/Save, docked panes, and persistent theme settings.
-- **In progress:** T-005, saved-document behavior. Headless automated verification is complete; a live visual confirmation of the Open/Save UI in the built Release app is outstanding.
-- **Most recent verification:** T-007 passes all 94 tests, `flutter analyze`, and `flutter build macos --release` (43.2 MB). Xcode logged the missing OS version for the `Any Mac` placeholder and stale build files outside this worktree; the build succeeded. No GUI window was launched; theme appearance is not visually verified.
-- **Next action:** Have a user (or an agent with Accessibility/window-focus access restored) click through Open and Save once in the Release build to visually confirm the in-house picker dialog, then mark T-005 done.
-- **Blockers:** Live visual verification of T-005's user-visible path is blocked by this agent's Accessibility permission being revoked; see T-005 Verification below.
+- **Current state:** a runnable macOS Flutter app with painting, in-house Open/Save, docked panes, persistent themes, and structured application logging.
+- **Current roadmap work:** T-008 is complete. T-005 remains blocked on the documented live visual confirmation of the Open/Save UI.
+- **Most recent verification:** T-008 passes all 104 tests and `flutter analyze`; the headless `PainterApp` Log-pane smoke test passes. No GUI window was opened for this change.
+- **Next action:** Complete T-005's separate live Open/Save visual confirmation when Accessibility/window-focus access is available.
+- **Blockers:** T-005's live visual verification is blocked by this agent's Accessibility permission being revoked; see T-005 Verification below.
 
 ## T-002 Verification
 
@@ -152,3 +152,13 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
   `build/macos/Build/Products/Release/painter.app` (43.3 MB). Xcode logged the
   `Any Mac` placeholder OS-version warning; the build succeeded.
 - No GUI window was opened or visually inspected for this change, per [testing.md](testing.md). This does not change T-005's separate visual-verification blocker.
+
+## T-008 Verification
+
+- Implemented append-only JSONL logging with UTC timestamps, severity, message-catalog IDs, formatting arguments, and optional stack traces. The shared logger backs settings/file-operation error reporting, Flutter/platform handlers, optional `--log-to-stdout`, the bottom status bar, and the selectable chronological Log pane. See [ADR 0012](decisions/0012-file-backed-logging.md).
+- Focused logging and file-workflow tests — passed all 9 tests, covering persistence/reload/order, malformed rows, catalog formatting, optional stdout, status updates, Log-pane ordering/scrolling, pane selection, and structured Open/Save failure records.
+- `flutter test` — passed all 104 tests.
+- `flutter analyze` — passed: `No issues found!`.
+- Headless app smoke: `flutter test test/logging/log_widgets_test.dart --plain-name 'PainterApp exposes Log as a pane mode'` — passed; it mounts `PainterApp`, selects Log, and observes the shared entry in both views.
+- No macOS GUI window was opened, per [testing.md](testing.md). This does not change T-005's separate visual-verification blocker.
+

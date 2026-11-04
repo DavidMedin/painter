@@ -28,11 +28,10 @@
 //
 // Not verified here (docs/status.md T-005): the Open/Save UI in the running
 // macOS Release build (a live visual confirmation is still outstanding), the
-// default picker start directory or InAppDocumentFileService, a dirty-state
+// default picker start directory or InAppDocumentFileService, and a dirty-state
 // prompt before open discards changes (a product decision still open in
-// ADR 0002), and logging of the failures to the terminal (debugPrint in
-// _showFileOperationError is not asserted). The brief's fatal-error scenario
-// is not covered by this file.
+// ADR 0002). The failure test below checks structured file-operation records;
+// the brief's fatal-error scenario is not covered by this file.
 
 import 'dart:io';
 
@@ -43,6 +42,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
 import 'package:painter/document/document_file_service.dart';
+import 'package:painter/logging/painter_log.dart';
 import 'package:painter/main.dart';
 
 void main() {
@@ -136,7 +136,11 @@ void main() {
       openPath: path,
       savePath: '${temporaryDirectory.path}/missing/save.paint',
     );
-    await tester.pumpWidget(PainterApp(fileService: fileService));
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await tester.pumpWidget(
+      PainterApp(fileService: fileService, logger: logger),
+    );
 
     final canvasFinder = find.byType(CanvasView);
     final controller = tester.widget<CanvasView>(canvasFinder).controller;
@@ -150,6 +154,14 @@ void main() {
 
     expect(find.text('File operation failed'), findsOneWidget);
     expect(find.textContaining('Could not open the document'), findsOneWidget);
+    expect(logger.entries, hasLength(1));
+    expect(logger.entries.single.messageId, 'document.operation.failed');
+    expect(logger.entries.single.arguments['operation'], 'open');
+    expect(
+      logger.entries.single.arguments['error'],
+      contains('FormatException'),
+    );
+    expect(logger.entries.single.stackTrace, contains('_openDocument'));
     expect(controller.document.strokes, hasLength(1));
     expect(
       controller.document.strokes.single.points.map((point) => point.position),
@@ -191,6 +203,10 @@ void main() {
 
     expect(find.text('File operation failed'), findsOneWidget);
     expect(find.textContaining('Could not save the document'), findsOneWidget);
+    expect(logger.entries, hasLength(2));
+    expect(logger.entries.last.messageId, 'document.operation.failed');
+    expect(logger.entries.last.arguments['operation'], 'save');
+    expect(logger.entries.last.stackTrace, isNotEmpty);
     expect(controller.document.strokes, hasLength(1));
     await tester.tap(find.text('Details'));
     await tester.pumpAndSettle();

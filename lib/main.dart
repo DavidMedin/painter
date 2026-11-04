@@ -1,24 +1,36 @@
-// What: The app shell. `main` restores settings and starts [PainterApp], which
-//   owns the canvas controller, selected document path, pane renderers, help,
-//   touch sizing, and theme settings. It builds the themed MaterialApp with Open
-//   / Save controls and selectable Canvas, Diagnostics, and Settings panes.
+// What: The app shell restores settings, installs file-backed logging, and
+//   starts [PainterApp], which owns canvas/document state, pane renderers, help,
+//   touch sizing, and theme settings. It builds the themed MaterialApp with
+//   Open/Save controls, selectable panes, and a latest-log status bar.
 //
-// Why: This shell owns state that crosses the canvas, document, settings, and
-//   pane systems. Keeping file and settings persistence here avoids coupling
-//   the painting model to dialogs or platform preferences.
+// Why: This shell owns state that crosses canvas, document, settings, logging,
+//   and pane systems. It keeps persistence and app-wide error routing out of
+//   the painting model.
 //
-// Coupled to: canvas/canvas_controller.dart, canvas/canvas_view.dart,
-//   canvas/tiled_renderer.dart, debug/canvas_debug_pane.dart,
-//   document/document_file_service.dart, settings/painter_settings.dart,
-//   settings/settings_store.dart, and settings/theme_settings_pane.dart.
+// Coupled to: canvas/, debug/, document/, help/, logging/, settings/, and ui/.
+// Error policy (docs/project-brief.md "Errors", ADR 0002 and ADR 0012): file
+// operation failures are recorded by [PainterLog] with a catalog message id,
+// arguments, and stack trace, then shown in an expandable-details popup. The
+// app continues running. [installFlutterLogHandlers] routes framework and
+// asynchronous errors to that same file-backed history. The optional
+// --log-to-stdout argument adds readable stdout output without replacing the
+// structured file records. Fatal-error classification remains undefined by
+// the brief, so the handlers do not invent one.
+//
+// Pane system (docs/decisions/0010-pane-system.md and ADR 0012): PaneSystem
+// owns the pane layout, Pane Mode selectors, boundary menus, and widths. This
+// shell keeps a TiledRenderer for every pane id, even while the pane shows
+// Diagnostics, so changing modes preserves diagnostic state. A Diagnostics
+// pane reads the first visible Canvas pane's renderer, or its own retained
+// renderer when no Canvas pane is visible. The Log pane and bottom status bar
+// observe the same PainterLog history.
 //
 // ---------------------------------------------------------------------------
 // App shell overview
 //
-// What it is: the top-level widget tree and the small amount of mutable
-// state that is not part of the painting model itself: the associated document
-// path, file-operation state, pane renderers, contextual-help state, and
-// touch-target size.
+// What it is: the top-level widget tree and app-owned state beyond the
+// painting model: document path, file-operation state, pane renderers, logger,
+// contextual help, and touch-target size.
 // Why PainterApp owns the document path and the in-flight flag: the path is
 // not part of CanvasDocument (the saved format, docs/decisions/0002-saved-
 // document-format-and-flow.md, contains strokes only), and the controller
@@ -46,25 +58,23 @@
 // succeeded, so a failed first save does not make later saves silently
 // target a path that was never written.
 //
-// Error policy (docs/project-brief.md "Errors", ADR 0002): a failed file
-// operation is logged to the terminal with its stack trace, shown in a popup
-// with an expandable "Details" section, and the app keeps running. In this
-// file that is implemented by the catch blocks in _openDocument and
-// _saveDocument, which call _showFileOperationError (its only callers);
-// _showFileOperationError does the debugPrint logging and the dialog. The
-// brief also asks for logging of non-file internal errors and for fatal-error
-// handling; nothing in lib/ installs a global handler for those (no
-// FlutterError.onError or runZonedGuarded), so that part of the brief is not
-// implemented here.
+// Error policy (docs/project-brief.md "Errors", ADR 0002 and ADR 0012): file
+// operation failures are recorded by [PainterLog] with a catalog message id,
+// arguments, and stack trace, then shown in an expandable-details popup. The
+// app continues running. [installFlutterLogHandlers] routes framework and
+// asynchronous errors to that same file-backed history. The optional
+// --log-to-stdout argument adds readable stdout output without replacing the
+// structured file records. Fatal-error classification remains undefined by
+// the brief, so the handlers do not invent one.
 //
-// Pane system (docs/decisions/0010-pane-system.md): PaneSystem owns the pane
-// layout, Pane Mode selectors, boundary menus, and widths. This shell keeps a
-// TiledRenderer for every pane id, even while the pane shows Diagnostics, so
-// changing modes preserves diagnostic state. A Diagnostics pane reads the
-// first visible Canvas pane's renderer, or its own retained renderer when no
-// Canvas pane is visible. F3 toggles Diagnostics beside the focused pane.
-// _debugOptions is shared with every CanvasView (which paints the overlays) and
-// each CanvasDebugPane (which edits the switches).
+// Pane system (docs/decisions/0010-pane-system.md and ADR 0012): PaneSystem
+// owns the pane layout, Pane Mode selectors, boundary menus, and widths. This
+// shell keeps a TiledRenderer for every pane id, even while the pane shows
+// Diagnostics, so changing modes preserves diagnostic state. A Diagnostics
+// pane reads the first visible Canvas pane's renderer, or its own retained
+// renderer when no Canvas pane is visible. The Log pane and bottom status bar
+// observe the same PainterLog history.
+//
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -79,6 +89,9 @@ import 'debug/canvas_debug_options.dart';
 import 'debug/canvas_debug_pane.dart';
 import 'document/document_file_service.dart';
 import 'help/contextual_help.dart';
+import 'logging/flutter_log_handlers.dart';
+import 'logging/log_widgets.dart';
+import 'logging/painter_log.dart';
 import 'settings/painter_settings.dart';
 import 'settings/settings_store.dart';
 import 'settings/theme_settings_pane.dart';
@@ -86,17 +99,32 @@ import 'ui/painter_action_button.dart';
 import 'ui/pane_system.dart';
 import 'ui/touch_target_settings.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  final logger = await PainterLog.open(
+    pipeToStdout: args.contains('--log-to-stdout'),
+  );
+  installFlutterLogHandlers(logger);
+  await logger.info('app.started');
   final store = SharedPreferencesPainterSettingsStore();
   PainterSettings settings;
   try {
     settings = await store.load();
   } catch (error, stackTrace) {
-    debugPrint('Could not load settings: $error\n$stackTrace');
+    await logger.warn(
+      'settings.load.failed',
+      arguments: {'error': error.toString()},
+      stackTrace: stackTrace.toString(),
+    );
     settings = PainterSettings.defaults;
   }
-  runApp(PainterApp(initialSettings: settings, persistSettings: store.save));
+  runApp(
+    PainterApp(
+      initialSettings: settings,
+      persistSettings: store.save,
+      logger: logger,
+    ),
+  );
 }
 
 /// The root widget of the Painter app.
@@ -106,6 +134,7 @@ class PainterApp extends StatefulWidget {
     this.fileService,
     this.initialSettings = PainterSettings.defaults,
     this.persistSettings,
+    this.logger,
   });
 
   /// Overridable for tests; defaults to [InAppDocumentFileService].
@@ -113,11 +142,15 @@ class PainterApp extends StatefulWidget {
   final PainterSettings initialSettings;
   final Future<void> Function(PainterSettings settings)? persistSettings;
 
+  /// Overridable for tests; defaults to an in-memory log store.
+  final PainterLog? logger;
   @override
   State<PainterApp> createState() => _PainterAppState();
 }
 
 class _PainterAppState extends State<PainterApp> {
+  late final PainterLog _logger;
+  late final bool _ownsLogger;
   final CanvasController _controller = CanvasController();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final DocumentFileService _fileService =
@@ -136,6 +169,8 @@ class _PainterAppState extends State<PainterApp> {
   @override
   void initState() {
     super.initState();
+    _ownsLogger = widget.logger == null;
+    _logger = widget.logger ?? PainterLog.memory();
     _settings = PainterSettingsController(
       initial: widget.initialSettings,
       persist: widget.persistSettings,
@@ -163,6 +198,7 @@ class _PainterAppState extends State<PainterApp> {
       ),
       PaneKind.diagnostics => _diagnosticsContent(pane, paneRenderer),
       PaneKind.settings => ThemeSettingsPane(controller: _settings),
+      PaneKind.log => LogPane(log: _logger),
     };
   }
 
@@ -180,7 +216,7 @@ class _PainterAppState extends State<PainterApp> {
     );
   }
 
-  /// Releases app-owned settings, renderer, controller, and help state.
+  /// Releases app-owned settings, logger, renderer, controller, and help state.
   /// [DocumentFileService] is not disposed; it may be injected and holds no
   /// resources.
   @override
@@ -192,6 +228,7 @@ class _PainterAppState extends State<PainterApp> {
     _debugOptions.dispose();
     _helpState.dispose();
     _controller.dispose();
+    if (_ownsLogger) _logger.dispose();
     super.dispose();
   }
 
@@ -253,21 +290,24 @@ class _PainterAppState extends State<PainterApp> {
     }
   }
 
-  /// Logs a failed open/save to the terminal and shows the popup with
-  /// expandable details required by docs/project-brief.md "Errors".
+  /// Logs a failed open/save and shows the popup with expandable details
+  /// required by docs/project-brief.md "Errors".
   ///
-  /// [operation] is the verb ('open' or 'save') spliced into the message, so
-  /// it must read correctly in "Failed to $operation" and "Could not
-  /// $operation the document". Called only from the catch blocks of
-  /// [_openDocument] and [_saveDocument]. The log happens before the
-  /// `mounted` check so the failure is recorded even if the widget is gone.
+  /// [operation] is the verb ('open' or 'save') spliced into the message.
+  /// Called only from the catch blocks of [_openDocument] and [_saveDocument].
+  /// The log happens before the `mounted` check so the failure is recorded
+  /// even if the widget is gone.
   Future<void> _showFileOperationError(
     BuildContext context,
     String operation,
     Object error,
     StackTrace stackTrace,
   ) async {
-    debugPrint('Failed to $operation Painter document: $error\n$stackTrace');
+    await _logger.error(
+      'document.operation.failed',
+      arguments: {'operation': operation, 'error': error.toString()},
+      stackTrace: stackTrace.toString(),
+    );
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
@@ -367,10 +407,17 @@ class _PainterAppState extends State<PainterApp> {
                   ),
                 ],
               ),
-              body: PaneSystem(
-                key: _paneSystemKey,
-                contentBuilder: _buildPaneContent,
-                onPaneRemoved: _onPaneRemoved,
+              body: Column(
+                children: [
+                  Expanded(
+                    child: PaneSystem(
+                      key: _paneSystemKey,
+                      contentBuilder: _buildPaneContent,
+                      onPaneRemoved: _onPaneRemoved,
+                    ),
+                  ),
+                  LogStatusBar(log: _logger),
+                ],
               ),
             ),
           ),

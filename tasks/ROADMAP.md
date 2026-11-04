@@ -49,7 +49,7 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
 ## T-005 — Implement saved-document behavior
 
 - **Priority:** P1
-- **Status:** in-progress
+- **Status:** blocked
 - **Dependencies:** T-001, T-003, T-004
 - **Outcome:** The save/open behavior specified by T-001 works in the macOS app; export is explicitly out of MVP scope.
 - **Acceptance criteria:**
@@ -78,3 +78,16 @@ The [task workflow](README.md) defines the canonical backlog rules and required 
   - The settings store persists mode and independent palette choices and restores them; malformed JSON falls back to defaults.
   - Program UI, canvas background, and diagnostics colors follow the selected theme while painting remains independent.
   - Headless tests cover selection, custom palette creation/editing, serialization, persistence, and the themed tile-state colors; `flutter analyze` and the macOS Release build pass.
+
+## T-008 — Implement structured application logging
+
+- **Priority:** P1
+- **Status:** done
+- **Dependencies:** T-002
+- **Outcome:** The macOS app records structured file-backed logs, exposes them in the shell, and can optionally mirror readable records to stdout.
+- **Acceptance criteria:**
+  - JSONL records contain UTC timestamps, severity, message-catalog IDs, formatting arguments, and optional stack traces; rendered message prose is not stored.
+  - File-operation failures, settings-load failures, Flutter framework errors, and unhandled platform errors use the shared logger; `--log-to-stdout` is optional and does not replace persistence.
+  - A bottom status bar shows the latest record, and a selectable Log pane displays chronological history with the newest entry at the bottom.
+  - Focused tests verify persistence/reload, formatting, optional stdout, file-operation logging, status updates, and pane ordering; `flutter analyze` and a headless app smoke scenario pass.
+
