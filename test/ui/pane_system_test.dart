@@ -211,6 +211,11 @@ void main() {
     await tester.tap(find.text('Manual').last);
     await tester.pumpAndSettle();
     expect(find.text('manual-0'), findsOneWidget);
+    await tester.tap(compactMenu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Log').last);
+    await tester.pumpAndSettle();
+    expect(find.text('log-0'), findsOneWidget);
 
     final devicePixelRatio = tester.view.devicePixelRatio;
     tester.view.physicalSize = Size(

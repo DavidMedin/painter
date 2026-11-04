@@ -62,8 +62,9 @@ Use an append-only database*: strokes, including eraser strokes, overlay existin
 
 ## Errors
 
-- A failed file operation displays a popup explaining the error, with an expandable area for more detailed information. This is the MVP behavior and may change later.
-- Failed file operations, internal errors, and exceptions are logged to the terminal and do not terminate the program.
+- A failed file operation displays a popup explaining the error, with an expandable area for more detailed information. The failure is also recorded in the application log.
+- Failed file operations, internal errors, and exceptions are logged to the persistent application log and do not terminate the program. `--log-to-stdout` optionally mirrors readable lines to stdout; JSONL records retain message-catalog IDs and formatting arguments rather than rendered prose.
+- The latest record appears in the bottom status bar; the selectable Log pane shows records chronologically with the newest at the bottom.
 - Fatal errors terminate the program only after the error, stack trace, and other relevant information have been successfully logged.
 
 ## Acceptance and Verification Scenarios
@@ -102,4 +103,4 @@ Keep the UI compact, useful, and configurable for touch. Blender is a visual ref
 - What is the default brush size, and what exact pressure-to-size mapping should the stylus use?
 - Which mouse gestures or controls perform pan, zoom, and rotation?
 - What should happen when opening another file would discard unsaved changes?
-- Which errors are classified as fatal, and which logging library should be used? These implementation choices require later design/evidence.
+- Which errors are classified as fatal? The logging implementation is recorded in ADR 0014; fatal classification and termination policy remain undecided.

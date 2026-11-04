@@ -1,25 +1,19 @@
-// What: The app shell owns the shared document, per-pane renderers and
-//   viewports, document path, help, and theme settings.
-// Why: File/settings persistence and per-pane view lifecycle cross the canvas
-//   and pane systems, so PainterApp coordinates them without coupling the
-//   document model to dialogs or preferences.
+// What: The app shell restores settings, initializes file-backed logging, and
+//   starts PainterApp, which owns document/file state, per-pane renderers and
+//   viewports, help, touch sizing, themes, and app-wide error reporting.
+// Why: This shell coordinates persistence and state that cross canvas,
+//   document, settings, logging, help, and pane systems without coupling those
+//   systems to the painting model.
+// Coupled to: canvas/, debug/, document/, help/, logging/, settings/, and ui/.
 //
-// Why: This shell owns state that crosses the canvas, document, settings, and
-//   pane systems. Keeping file and settings persistence here avoids coupling
-//   the painting model to dialogs or platform preferences.
 //
-// Coupled to: canvas/canvas_controller.dart, canvas/canvas_view.dart,
-//   canvas/tiled_renderer.dart, debug/canvas_debug_pane.dart,
-//   document/document_file_service.dart, settings/painter_settings.dart,
-//   settings/settings_store.dart, and settings/theme_settings_pane.dart.
 //
 // ---------------------------------------------------------------------------
 // App shell overview
 //
-// What it is: the top-level widget tree and the small amount of mutable
-// state that is not part of the painting model itself: the associated document
-// path, file-operation state, pane renderers, contextual-help state, and
-// touch-target size.
+// What it is: the top-level widget tree and app-owned state beyond the
+// painting model: document path, file-operation state, pane renderers, logger,
+// contextual help, and touch-target size.
 // Why PainterApp owns the document path and the in-flight flag: the path is
 // not part of CanvasDocument (the saved format, docs/decisions/0002-saved-
 // document-format-and-flow.md, contains strokes only), and the controller
@@ -47,24 +41,21 @@
 // succeeded, so a failed first save does not make later saves silently
 // target a path that was never written.
 //
-// Error policy (docs/project-brief.md "Errors", ADR 0002): a failed file
-// operation is logged to the terminal with its stack trace, shown in a popup
-// with an expandable "Details" section, and the app keeps running. In this
-// file that is implemented by the catch blocks in _openDocument and
-// _saveDocument, which call _showFileOperationError (its only callers);
-// _showFileOperationError does the debugPrint logging and the dialog. The
-// brief also asks for logging of non-file internal errors and for fatal-error
-// handling; nothing in lib/ installs a global handler for those (no
-// FlutterError.onError or runZonedGuarded), so that part of the brief is not
-// implemented here.
+// Error policy (docs/project-brief.md "Errors", ADR 0002 and ADR 0014): file
+// operation failures are recorded by [PainterLog] with a catalog message id,
+// arguments, and stack trace, then shown in an expandable-details popup. The
+// app continues running. [installFlutterLogHandlers] routes framework and
+// asynchronous errors to that same file-backed history. Fatal-error
+// classification remains undefined by the brief, so the handlers do not
+// invent one.
 //
-// Pane system (docs/decisions/0010-pane-system.md): PaneSystem owns the split
-// tree, pane types, focus, and resize weights. The shell shares one document
-// controller across Canvas panes, retains renderers per pane, and owns an
-// independent viewport per Canvas pane. Diagnostics reads the first Canvas
-// pane's renderer and viewport, or uses its own retained pane state if no
-// Canvas is visible. F3 docks Diagnostics beside Canvas; _debugOptions is
-// shared with every CanvasView and CanvasDebugPane.
+// Pane system (docs/decisions/0010-pane-system.md, ADRs 0012–0013): PaneSystem
+// owns the split tree, content modes, focus, and resize weights. PainterApp
+// retains a renderer per pane and an independent viewport per Canvas pane.
+// Diagnostics reads a visible Canvas pane's state or uses its own retained
+// renderer and viewport. Manual panes show contextual help; the Log pane and
+// bottom status bar observe the same PainterLog history.
+//
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -80,6 +71,9 @@ import 'debug/canvas_debug_pane.dart';
 import 'document/document_file_service.dart';
 import 'help/contextual_help.dart';
 import 'help/manual_pane.dart';
+import 'logging/flutter_log_handlers.dart';
+import 'logging/log_widgets.dart';
+import 'logging/painter_log.dart';
 import 'settings/painter_settings.dart';
 import 'settings/settings_store.dart';
 import 'settings/theme_settings_pane.dart';
@@ -87,17 +81,32 @@ import 'ui/painter_action_button.dart';
 import 'ui/pane_system.dart';
 import 'ui/touch_target_settings.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  final logger = await PainterLog.open(
+    pipeToStdout: args.contains('--log-to-stdout'),
+  );
+  installFlutterLogHandlers(logger);
+  await logger.info('app.started');
   final store = SharedPreferencesPainterSettingsStore();
   PainterSettings settings;
   try {
     settings = await store.load();
   } catch (error, stackTrace) {
-    debugPrint('Could not load settings: $error\n$stackTrace');
+    await logger.warn(
+      'settings.load.failed',
+      arguments: {'error': error.toString()},
+      stackTrace: stackTrace.toString(),
+    );
     settings = PainterSettings.defaults;
   }
-  runApp(PainterApp(initialSettings: settings, persistSettings: store.save));
+  runApp(
+    PainterApp(
+      initialSettings: settings,
+      persistSettings: store.save,
+      logger: logger,
+    ),
+  );
 }
 
 /// The root widget of the Painter app.
@@ -107,6 +116,7 @@ class PainterApp extends StatefulWidget {
     this.fileService,
     this.initialSettings = PainterSettings.defaults,
     this.persistSettings,
+    this.logger,
   });
 
   /// Overridable for tests; defaults to [InAppDocumentFileService].
@@ -114,11 +124,15 @@ class PainterApp extends StatefulWidget {
   final PainterSettings initialSettings;
   final Future<void> Function(PainterSettings settings)? persistSettings;
 
+  /// Overridable for tests; defaults to an in-memory log store.
+  final PainterLog? logger;
   @override
   State<PainterApp> createState() => _PainterAppState();
 }
 
 class _PainterAppState extends State<PainterApp> {
+  late final PainterLog _logger;
+  late final bool _ownsLogger;
   final CanvasController _controller = CanvasController();
   late final DocumentFileService _fileService =
       widget.fileService ?? InAppDocumentFileService();
@@ -137,6 +151,8 @@ class _PainterAppState extends State<PainterApp> {
   @override
   void initState() {
     super.initState();
+    _ownsLogger = widget.logger == null;
+    _logger = widget.logger ?? PainterLog.memory();
     _settings = PainterSettingsController(
       initial: widget.initialSettings,
       persist: widget.persistSettings,
@@ -179,6 +195,7 @@ class _PainterAppState extends State<PainterApp> {
         helpId: pane.manualHelpId,
         onHelpIdSelected: pane.onManualHelpSelected,
       ),
+      PaneKind.log => LogPane(log: _logger),
     };
   }
 
@@ -202,7 +219,7 @@ class _PainterAppState extends State<PainterApp> {
     _paneSystemKey.currentState?.openManual(_helpState.activeTopic);
   }
 
-  /// Releases app-owned settings, renderer, controller, and help state.
+  /// Releases app-owned settings, logger, renderers, viewports, and help state.
   /// [DocumentFileService] is not disposed; it may be injected and holds no
   /// resources.
   @override
@@ -217,6 +234,7 @@ class _PainterAppState extends State<PainterApp> {
     for (final viewport in _viewports.values) {
       viewport.dispose();
     }
+    if (_ownsLogger) _logger.dispose();
     super.dispose();
   }
 
@@ -275,21 +293,24 @@ class _PainterAppState extends State<PainterApp> {
     }
   }
 
-  /// Logs a failed open/save to the terminal and shows the popup with
-  /// expandable details required by docs/project-brief.md "Errors".
+  /// Logs a failed open/save and shows the popup with expandable details
+  /// required by docs/project-brief.md "Errors".
   ///
-  /// [operation] is the verb ('open' or 'save') spliced into the message, so
-  /// it must read correctly in "Failed to $operation" and "Could not
-  /// $operation the document". Called only from the catch blocks of
-  /// [_openDocument] and [_saveDocument]. The log happens before the
-  /// `mounted` check so the failure is recorded even if the widget is gone.
+  /// [operation] is the verb ('open' or 'save') spliced into the message.
+  /// Called only from the catch blocks of [_openDocument] and [_saveDocument].
+  /// The log happens before the `mounted` check so the failure is recorded
+  /// even if the widget is gone.
   Future<void> _showFileOperationError(
     BuildContext context,
     String operation,
     Object error,
     StackTrace stackTrace,
   ) async {
-    debugPrint('Failed to $operation Painter document: $error\n$stackTrace');
+    await _logger.error(
+      'document.operation.failed',
+      arguments: {'operation': operation, 'error': error.toString()},
+      stackTrace: stackTrace.toString(),
+    );
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
@@ -388,11 +409,18 @@ class _PainterAppState extends State<PainterApp> {
                   ),
                 ],
               ),
-              body: PaneSystem(
-                key: _paneSystemKey,
-                contentBuilder: _buildPaneContent,
-                onPaneRemoved: _onPaneRemoved,
-                onPaneTypeChanged: _onPaneTypeChanged,
+              body: Column(
+                children: [
+                  Expanded(
+                    child: PaneSystem(
+                      key: _paneSystemKey,
+                      contentBuilder: _buildPaneContent,
+                      onPaneRemoved: _onPaneRemoved,
+                      onPaneTypeChanged: _onPaneTypeChanged,
+                    ),
+                  ),
+                  LogStatusBar(log: _logger),
+                ],
               ),
             ),
           ),

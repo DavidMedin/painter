@@ -30,6 +30,12 @@
 - **Wiring:** `PainterApp` in `lib/main.dart` owns the current document path and in-flight file-operation state, and shows a details-expandable error dialog on failure without replacing the current document or crashing.
 - **Evidence and record:** because picking is ordinary Flutter UI, `flutter test` drives and verifies the full open/save flow headlessly, including the picker dialog itself (navigate, type a name, confirm, cancel); no native dialog, VM, or file-picker plugin dependency is required.
 
+## Application logging (T-008)
+
+- `PainterLog` in `lib/logging/` appends JSONL records to `~/Library/Logs/Painter/painter.log` on macOS. Each row contains a UTC timestamp, severity, message-catalog ID, formatting arguments, and optional stack trace; display and stdout prose is resolved by `LogMessages` rather than stored in the record.
+- `main.dart` opens one shared logger before loading settings, records settings-load and document-operation failures, and installs Flutter framework/platform error handlers. `--log-to-stdout` adds readable output without disabling file persistence. Fatal-error classification remains an open product question.
+- **Log presentation:** `LogStatusBar` and the selectable `LogPane` observe the same history. The pane preserves file order and scrolls to the newest row at the bottom. See [ADR 0014](decisions/0014-file-backed-logging.md).
+
 ## App settings and theming
 
 - `PainterSettings` and `PainterTheme` in `lib/settings/` define System/Light/Dark
@@ -56,19 +62,21 @@
 ## Docked pane system and diagnostics
 
 - **Pane layout:** `lib/ui/pane_system.dart` owns Canvas, Diagnostics, Settings,
-  and Manual modes in a nested binary split tree. Manual panes retain a selected
-  `HelpId`; F1 focuses an existing Manual pane or inserts one beside the widest
-  leaf. Each split has a visible 12-logical-pixel handle when space permits,
-  clamped to the available extent, with right-click split/close actions for its
-  adjacent panes. Focused and inactive borders are distinct, and non-Canvas
-  content uses the active theme surface. Headers switch to compact actions below
-  180 logical pixels and omit controls below 48. F3 adds or removes Diagnostics.
-  See [ADR 0010](decisions/0010-pane-system.md) for pane mechanics and
-  [ADR 0013](decisions/0013-docked-manual-pane.md) for Manual.
-- **Evidence:** headless tests cover pane-mode selection, Settings, both split
-  axes, resizing, close, F3, widest-leaf Manual placement and reuse, article
-  navigation, themed surfaces, border/handle contrast, divider right-click
-  actions, and a 14-logical-pixel pane without overflow. Diagnostics, controls,
+  Manual, and Log modes in a nested binary split tree. Manual panes retain a
+  selected `HelpId`; F1 focuses an existing Manual pane or inserts one beside
+  the widest leaf. Each split has a visible 12-logical-pixel handle when space
+  permits, clamped to the available extent, with right-click split/close actions
+  for its adjacent panes. Focused and inactive borders are distinct, and
+  non-Canvas content uses the active theme surface. Headers switch to compact
+  actions below 180 logical pixels and omit controls below 48. F3 adds or
+  removes Diagnostics. See [ADR 0010](decisions/0010-pane-system.md) for pane
+  mechanics, [ADR 0013](decisions/0013-docked-manual-pane.md) for Manual, and
+  [ADR 0014](decisions/0014-file-backed-logging.md) for Log.
+- **Evidence:** headless tests cover pane-mode selection including Settings and
+  Log, both split axes, resizing, close, F3, widest-leaf Manual placement and
+  reuse, article navigation, themed surfaces, border/handle contrast, divider
+  right-click actions, and a 14-logical-pixel pane without overflow. Log-pane
+  and status-bar tests cover their shared history. Diagnostics, controls,
   overlays, reports, and continued drawing remain covered. Canvas tests verify
   shared documents with independent viewports and fixed-white paper under a dark
   theme. App workflows cover opening resets, file-error Details help to Manual,
@@ -89,14 +97,6 @@
   articles. F1 prefers hovered help, then keyboard focus, then general help.
   `TouchTargetSettings` provides app-wide 48-logical-pixel standard and
   56-logical-pixel enlarged minimum heights.
-- **Evidence:** headless tests cover pane-mode selection, Settings, both split
-  axes, resizing, close, F3, widest-leaf Manual placement and reuse, article
-  navigation, themed surfaces, border/handle contrast, divider right-click
-  actions, and a 14-logical-pixel pane without overflow. Diagnostics, controls,
-  overlays, reports, and continued drawing remain covered. Canvas tests verify
-  shared documents with independent viewports and fixed-white paper under a dark
-  theme. App workflows cover opening resets, file-error Details help to Manual,
-  and the two-Canvas document path. macOS window appearance is not verified.
 
 ## Code Documentation
 

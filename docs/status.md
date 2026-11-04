@@ -1,10 +1,11 @@
 # Project Status
 
-- **Current state:** macOS Flutter app with the first painting workflow, in-house Open/Save, binary split panes with shared-document Canvas views, persistent theme settings, and docked Manual help from F1.
-- **In progress:** T-005, saved-document behavior. Headless verification passes; live visual confirmation of Open/Save and pane/viewport behavior in the Release app remains outstanding.
-- **Most recent verification:** on the merged feature tree before stacking, `flutter test` passed all 101 tests; `flutter analyze` reported `No issues found!`; focused pane/document tests exited 0; and `flutter build macos --release` built a 43.3 MB app. No GUI window was opened.
-- **Next action:** with explicit permission for windowed testing, visually exercise Open/Save, pane selection, both split orientations, resizing, and independent Canvas views before marking T-005 done.
-- **Blockers:** live visual verification remains outstanding; no GUI window was opened or foregrounded during this integration. See T-005 Verification below.
+- **Current state:** a runnable macOS Flutter app with painting, in-house Open/Save, binary split panes with shared-document Canvas views and independent viewports, docked Manual help, persistent themes, and structured application logging.
+- **Current roadmap work:** T-008 is complete. T-005 remains blocked on the documented live visual confirmation of the Open/Save UI and pane behavior.
+- **Most recent verification:** combined merge checks passed: `flutter test` passed all 111 tests; `flutter analyze` reported `No issues found!`; the focused pane suite passed all 7 tests; and the app-level Log-pane smoke passed.
+- **Next action:** complete T-005's live Open/Save and pane visual confirmation when Accessibility/window-focus access is available.
+- **Blockers:** T-005's live visual verification remains outstanding; no GUI window was opened during merge verification. See T-005 Verification below.
+
 
 ## T-002 Verification
 
@@ -160,46 +161,29 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 ## Canvas Pane Viewports and Fixed Paper Verification (out-of-roadmap UI enhancement)
 
 - Implemented side-by-side and top-and-bottom binary splits with draggable dividers, shared document state with independent per-Canvas pan/zoom/rotation, and fixed white canvas paper. Legacy `canvasBackground` palette keys remain loadable and are omitted from new palettes. See [ADR 0012](decisions/0012-pane-viewports-and-fixed-canvas-paper.md).
-- Before stacking, `flutter test` passed all 96 tests. Coverage included both
-  split axes, resizing and close, mode selection, shared Canvas documents with
-  independent viewports, dark-theme white-paper pixels, legacy palette
-  compatibility, and the app-level two-Canvas save/open workflow resetting
-  both viewport transforms.
+- Before stacking, `flutter test` passed all 96 tests. Coverage included both split axes, resizing and close, mode selection, shared Canvas documents with independent viewports, dark-theme white-paper pixels, legacy palette compatibility, and the app-level two-Canvas save/open workflow resetting both viewport transforms.
 - Before stacking, `flutter analyze` reported no issues, `flutter test test/widget_test.dart` passed both headless app smoke tests, and `flutter build macos --release` succeeded with a 43.3 MB app. Xcode logged an arm64-only configuration suggestion, the `Any Mac` placeholder OS-version warning, and stale-file warnings for artifacts under `/Users/medindj1/small-projects/painter/build/` outside this worktree.
-- After stacking on the Settings palette overflow fix, `flutter test` passed
-  all 99 tests; `flutter analyze` reported `No issues found!`; and
-  `flutter test test/widget_test.dart` passed both app-shell tests. The
-  post-stack Release build was not run.
+- After stacking on the Settings palette overflow fix, `flutter test` passed all 99 tests; `flutter analyze` reported `No issues found!`; and `flutter test test/widget_test.dart` passed both app-shell tests. The post-stack Release build was not run.
 - No GUI window was opened or visually inspected. Live appearance of the pane controls, viewport interactions, and fixed paper remains unverified; T-005 stays in progress.
 
 ## Manual and Binary Split-Tree Integration Verification
 
-- Integrated Manual as a pane leaf. F1 reuses an existing Manual pane or inserts
-  one beside the widest leaf; selecting another article updates that pane. The
-  app-level file-error Details route is covered. See [ADR 0013](decisions/0013-docked-manual-pane.md).
-- Before the pane-rendering change was stacked, focused pane/document tests and
-  the full suite passed; `flutter test` reported 101 tests and `flutter analyze`
-  reported `No issues found!`. The Release build succeeded at 43.3 MB. Xcode
-  emitted its `Any Mac` placeholder, arm64-only, and stale-artifact warnings.
-- The file-failure workflow emitted its expected `FormatException` and
-  `PathNotFoundException` diagnostics. No GUI window was opened; T-005 remains
-  in progress pending live visual verification.
+- Integrated Manual as a pane leaf. F1 reuses an existing Manual pane or inserts one beside the widest leaf; selecting another article updates that pane. The app-level file-error Details route is covered. See [ADR 0013](decisions/0013-docked-manual-pane.md).
+- Before the pane-rendering change was stacked, focused pane/document tests and the full suite passed; `flutter test` reported 101 tests and `flutter analyze` reported `No issues found!`. The Release build succeeded at 43.3 MB. Xcode emitted its `Any Mac` placeholder, arm64-only, and stale-artifact warnings.
+- The file-failure workflow emitted its expected `FormatException` and `PathNotFoundException` diagnostics. No GUI window was opened; T-005 remains in progress pending live visual verification.
 
 ## Pane Rendering and Narrow Layout Fix (out-of-roadmap UI fix)
 
-- Pane surfaces and borders follow the active theme; visible 12-logical-pixel
-  divider hit areas clamp to narrow split extents and open adjacent-pane actions
-  on right-click. Headers use a compact action menu below 180 logical pixels
-  and omit controls below 48 pixels.
-- Before stacking, `flutter test test/ui/pane_system_test.dart` passed all 6
-  tests, `flutter test` passed all 102 tests, and `flutter analyze` reported
-  `No issues found!`. The narrow-layout test verified a 14-logical-pixel pane
-  without overflow and exercised its compact mode action.
+- Pane surfaces and borders follow the active theme; visible 12-logical-pixel divider hit areas clamp to narrow split extents and open adjacent-pane actions on right-click. Headers use a compact action menu below 180 logical pixels and omit controls below 48 pixels.
+- Before stacking, `flutter test test/ui/pane_system_test.dart` passed all 6 tests, `flutter test` passed all 102 tests, and `flutter analyze` reported `No issues found!`. The narrow-layout test verified a 14-logical-pixel pane without overflow and exercised its compact mode action.
 - Verification was headless; no GUI window was opened or visually inspected.
+- Combined merge verification: `flutter test test/ui/pane_system_test.dart` passed all 7 tests, including compact-mode Log selection; widget tests reported no layout exceptions. T-005 remains in progress.
 
-- Combined rebased-tree verification: `flutter test test/ui/pane_system_test.dart`
-  passed all 7 tests; `flutter test` passed all 104 tests; `flutter analyze`
-  reported `No issues found!`. Coverage includes compact-mode Manual selection
-  and docked Manual navigation; the widget tests reported no layout exceptions.
-  T-005 remains in progress.
+## T-008 Verification
 
+- Implemented append-only JSONL logging with UTC timestamps, severity, message-catalog IDs, formatting arguments, and optional stack traces. The shared logger backs settings/file-operation error reporting, Flutter/platform handlers, optional `--log-to-stdout`, the bottom status bar, and the selectable chronological Log pane. See [ADR 0014](decisions/0014-file-backed-logging.md).
+- Focused logging and file-workflow tests — passed all 9 tests, covering persistence/reload/order, malformed rows, catalog formatting, optional stdout, status updates, Log-pane ordering/scrolling, pane selection, and structured Open/Save failure records.
+- `flutter test` — passed all 111 tests.
+- `flutter analyze` — passed: `No issues found!`.
+- Headless app smoke: `flutter test test/logging/log_widgets_test.dart --plain-name 'PainterApp exposes Log as a pane mode'` — passed; it mounts `PainterApp`, selects Log, and observes the shared entry in both views.
+- No macOS GUI window was opened, per [testing.md](testing.md). This does not change T-005's separate visual-verification blocker.

@@ -6,22 +6,26 @@
 //   decision.
 // Coupled to: main.dart (content builder and per-pane state ownership),
 //   contextual_help.dart (pane control ids), manual_catalog.dart and
-//   manual_pane.dart (manual navigation), and touch_target_settings.dart.
+//   manual_pane.dart (manual navigation), logging/ (Log content mode), and
+//   touch_target_settings.dart.
+//
 //
 // ---------------------------------------------------------------------------
 // Pane-system overview
 //
 // Each pane has a stable identity and one content kind: Canvas, Diagnostics,
-// Settings, or Manual. Split replaces a leaf with a binary split node; each
-// split chooses side-by-side or top-and-bottom, and its divider changes only
-// that node's two child weights. Closing any leaf except the final pane
-// collapses its parent into its sibling. F3 creates a side-by-side Diagnostics
-// pane beside Canvas; if Diagnostics is the sole pane, F3 changes it to Canvas.
-// F1 opens the hovered or focused control's article in an existing Manual pane,
-// or inserts Manual beside the widest pane. Manual page selection, pane layout,
-// focus, and split weights are runtime-only. The owner builds content from
-// PaneDescriptor and owns pane renderers/viewports; this widget knows nothing
-// about documents or drawing.
+// Settings, Manual, or Log. Splitting a leaf creates a binary split node with
+// either side-by-side or top-and-bottom children; its divider changes only
+// those child weights. Closing any leaf except the final pane collapses its
+// parent into its sibling. F3 creates Diagnostics beside Canvas; if
+// Diagnostics is the sole pane, F3 changes it to Canvas. F1 opens the hovered
+// or focused article in an existing Manual pane, or inserts Manual beside the
+// widest pane. Each pane's top bar selects its content mode. Boundary menus
+// add Canvas panes or delete the adjacent pane, and the final-pane empty state
+// offers an Open Canvas Pane action. Pane layout and widths are runtime-only.
+// The owner builds content from PaneDescriptor and owns content-specific state;
+// this widget knows nothing about documents or drawing.
+
 // ---------------------------------------------------------------------------
 
 import 'dart:math' as math;
@@ -37,7 +41,8 @@ enum PaneKind {
   canvas('Canvas', Icons.brush_outlined),
   diagnostics('Diagnostics', Icons.analytics_outlined),
   settings('Settings', Icons.settings_outlined),
-  manual('Manual', Icons.menu_book_outlined);
+  manual('Manual', Icons.menu_book_outlined),
+  log('Log', Icons.receipt_long_outlined);
 
   const PaneKind(this.label, this.icon);
 
@@ -202,7 +207,8 @@ class PaneSystemState extends State<PaneSystem> {
             PaneKind.canvas => PaneKind.diagnostics,
             PaneKind.diagnostics ||
             PaneKind.settings ||
-            PaneKind.manual => PaneKind.canvas,
+            PaneKind.manual ||
+            PaneKind.log => PaneKind.canvas,
           },
       manualHelpId: manualHelpId,
     );
@@ -506,6 +512,8 @@ class PaneSystemState extends State<PaneSystem> {
             _setPaneKind(pane.id, PaneKind.settings);
           case _CompactPaneAction.manual:
             _setPaneKind(pane.id, PaneKind.manual);
+          case _CompactPaneAction.log:
+            _setPaneKind(pane.id, PaneKind.log);
           case _CompactPaneAction.splitSideBySide:
             _splitPane(pane.id, axis: Axis.horizontal);
           case _CompactPaneAction.splitTopAndBottom:
@@ -522,6 +530,7 @@ class PaneSystemState extends State<PaneSystem> {
               PaneKind.diagnostics => _CompactPaneAction.diagnostics,
               PaneKind.settings => _CompactPaneAction.settings,
               PaneKind.manual => _CompactPaneAction.manual,
+              PaneKind.log => _CompactPaneAction.log,
             },
             child: Text(kind.label),
           ),
@@ -747,6 +756,7 @@ enum _CompactPaneAction {
   diagnostics,
   settings,
   manual,
+  log,
   splitSideBySide,
   splitTopAndBottom,
   close,
