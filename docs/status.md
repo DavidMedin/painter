@@ -128,6 +128,6 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 
 - Direct request: Blender-like panes with selectable Canvas/Diagnostics content, horizontal splitting, draggable resizing, close controls, and F3 toggling. Implemented on branch `feature/pane-system`; [ADR 0010](decisions/0010-pane-system.md) records the layout and its constraints. Roadmap task T-005 remains unchanged.
 - `flutter analyze` — passed: `No issues found!`.
-- `flutter test` — passed all 86 tests. Coverage includes the initial single Canvas with no Diagnostics pane, selector behavior, split/resize/close, F3 docking, real diagnostics, and drawing while Diagnostics is open.
+- `flutter test` — passed all 87 tests on the stacked tree. Coverage includes the initial single Canvas with no Diagnostics pane, selector behavior, split/resize/close, F3 docking, real diagnostics, and drawing while Diagnostics is open.
 - Not verified: appearance in a running macOS window; no GUI window was opened, per [testing.md](testing.md).
 
