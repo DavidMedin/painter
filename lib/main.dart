@@ -86,16 +86,6 @@ import 'help/contextual_help.dart';
 import 'ui/painter_action_button.dart';
 import 'ui/touch_target_settings.dart';
 
-/// Workspace arrangements backed by implemented app content.
-enum WorkspaceMode {
-  canvas('Canvas'),
-  canvasDiagnostics('Diagnostics');
-
-  const WorkspaceMode(this.label);
-
-  final String label;
-}
-
 void main() {
   runApp(const PainterApp());
 }

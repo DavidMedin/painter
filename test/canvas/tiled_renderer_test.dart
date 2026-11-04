@@ -255,6 +255,43 @@ void main() {
     expect(_red(bytes, 100, 20), lessThan(255));
   });
 
+  test('a committed live chunk stays visible while its tile updates', () async {
+    final controller = CanvasController();
+    addTearDown(controller.dispose);
+    final renderer = _renderer();
+    await _settled(renderer, controller.document);
+
+    controller.beginStroke(const Offset(20, 20), 1);
+    for (var i = 1; i < CanvasController.activeStrokeChunkPoints; i++) {
+      controller.extendStroke(Offset(20 + i * 0.5, 20), 1);
+    }
+    final beforeRollover = await _frame(
+      renderer,
+      controller.document,
+      active: controller.activePoints,
+    );
+    expect(_red(beforeRollover, 30, 20), lessThan(255));
+
+    controller.extendStroke(
+      Offset(20 + CanvasController.activeStrokeChunkPoints * 0.5, 20),
+      1,
+    );
+    expect(controller.document.strokeCount, 1);
+    final duringTileUpdate = await _frame(
+      renderer,
+      controller.document,
+      active: controller.activePoints,
+    );
+
+    expect(_red(duringTileUpdate, 30, 20), _red(beforeRollover, 30, 20));
+    final afterTileUpdate = await _settled(
+      renderer,
+      controller.document,
+      active: controller.activePoints,
+    );
+    expect(_red(afterTileUpdate, 30, 20), _red(beforeRollover, 30, 20));
+  });
+
   test('lighter pressure marks fewer pixels than full pressure', () async {
     final light = _inked(
       await _settled(_renderer(), _documentOf([_horizontal(0.2)])),

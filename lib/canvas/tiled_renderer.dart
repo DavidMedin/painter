@@ -1,8 +1,7 @@
-// What: TiledRenderer, the per-frame painter of the document. Each frame it
-// draws visible tiles from TileCache, falls back to other resolutions for
-// tiles that are not ready, classifies them for debug stats, and draws the
-// current in-progress chunk live. It also builds the gaussian sprite that
-// every splat samples.
+// What: TiledRenderer paints cached tiles, ready splats missing from stale
+// tile images, and the current in-progress chunk. It falls back to other
+// resolutions for tiles that are not ready, classifies them for debug stats,
+// and builds the gaussian sprite that every splat samples.
 // Why: painting has to be fast and must never wait on rasterization, so the
 // slow work lives in tile_cache.dart and this file only reads cached content
 // and asks for what is missing. It owns the sprite, cache, and active-chunk
@@ -20,16 +19,19 @@ import 'package:flutter/painting.dart';
 
 import 'canvas_controller.dart';
 import 'pencil_splats.dart';
+import 'splat_worker.dart';
 import 'tile_cache.dart';
 import 'tile_grid.dart';
 import 'tile_stats.dart';
 
-/// Paints cached tiles and the current in-progress chunk live.
+/// Paints cached tiles, ready missing splats over stale images, and the
+/// current in-progress chunk live.
 ///
-/// Per frame this draws a bounded number of tile images (only those visible)
-/// instead of replaying every stroke, so frame cost tracks screen area, not
-/// document size. Missing tiles fall back to the closest cached resolution
-/// scaled to fit while the right one builds in the background.
+/// The steady-state frame path draws a bounded number of visible tile images
+/// instead of replaying every stroke. While replacement images are pending,
+/// ready splats missing from each image are clipped to that image's region.
+/// Missing tiles fall back to the closest cached resolution scaled to fit
+/// while the right one builds in the background.
 ///
 /// Created and disposed by `_CanvasViewState` (canvas_view.dart), whose
 /// `_CanvasPainter.paint` calls [paint] every frame and repaints whenever
@@ -50,6 +52,11 @@ class TiledRenderer {
   SplatStream? _activeStream;
   List<CanvasPoint>? _activeSource;
   int _activeSeed = 0;
+
+  CanvasDocument? _activeDocument;
+  final ui.Paint _atlasPaint = ui.Paint()
+    ..isAntiAlias = true
+    ..filterQuality = ui.FilterQuality.medium;
   // Source rectangles for drawRawAtlas; see _rectsFor.
   Float32List? _rects;
 
@@ -62,7 +69,8 @@ class TiledRenderer {
   /// Recent per-frame recording times in milliseconds, oldest first.
   final Queue<double> recordHistory = Queue<double>();
 
-  /// Paints [document] and the active chunk into [canvas].
+  /// Paints [document], ready splat overlays for stale images, and the active
+  /// chunk into [canvas].
   ///
   /// [canvas] must already carry the document-to-screen transform. [visible] is
   /// the document-space rectangle on screen and [pixelsPerUnit] the on-screen
@@ -71,15 +79,18 @@ class TiledRenderer {
   /// Per frame: attach the document to [cache]; choose the level with
   /// `TileGrid.levelFor`; for each visible tile at that level, draw the cached
   /// image (current or stale) or a fallback, ask [cache] for anything not
-  /// current, and record in [frame] how it was drawn; finally tell the cache
-  /// which tiles were used ([TileCache.setWanted], which protects them from
-  /// eviction and drops queued work for tiles no longer visible) and draw the
-  /// active chunk over the tiles. This method never builds or waits.
+  /// current, and draw ready splats missing from the image, clipped to its
+  /// region. Then record in [frame] how it was drawn; tell the cache which
+  /// tiles were used ([TileCache.setWanted], which protects them from eviction
+  /// and drops queued work for tiles no longer visible); and draw the active
+  /// chunk over the tiles. This method never builds or waits.
   ///
   /// Coupled to: [TileCache.attach], [TileCache.tile], [TileCache.isCurrent],
-  /// [TileCache.request], [TileCache.setWanted]; [_drawTile], [_drawFallback],
-  /// [_paintActive]; and [TileFrameStats] (every branch below bumps exactly one
-  /// of its per-tile counters and sets `draws[key]`).
+  /// [TileCache.request], [TileCache.setWanted], [TileCache.splatsIfReady],
+  /// [TileCache.cacheLiveSplats]; [_drawTile], [_drawFallback],
+  /// [_drawPendingSplats], [_retainCommittedActive], [_paintActive]; and
+  /// [TileFrameStats] (every branch below bumps exactly one of its per-tile
+  /// counters and sets `draws[key]`).
   void paint(
     ui.Canvas canvas, {
     required CanvasDocument document,
@@ -89,6 +100,7 @@ class TiledRenderer {
   }) {
     final clock = Stopwatch()..start();
     cache.attach(document);
+    _retainCommittedActive(document);
     // Level choice must be the same one TileCache's tiles are keyed by; both
     // sides get it from TileGrid so they cannot disagree.
     final level = TileGrid.levelFor(pixelsPerUnit);
@@ -113,6 +125,14 @@ class TiledRenderer {
       if (!current) cache.request(key);
       if (tile != null) {
         _drawTile(canvas, key, tile, paint);
+        if (!current) {
+          _drawPendingSplats(
+            canvas,
+            document,
+            TileGrid.rectOf(key),
+            tile.appliedStrokes,
+          );
+        }
         if (tile.image == null) {
           frame.blank++;
           frame.draws[key] = TileDraw.blank;
@@ -124,7 +144,11 @@ class TiledRenderer {
           frame.draws[key] = TileDraw.stale;
         }
       } else {
-        frame.draws[key] = _drawFallback(canvas, key, paint, wanted);
+        final fallback = _drawFallback(canvas, document, key, paint, wanted);
+        if (fallback == TileDraw.missing) {
+          _drawPendingSplats(canvas, document, TileGrid.rectOf(key), 0);
+        }
+        frame.draws[key] = fallback;
       }
     }
     // After the loop: fallback tiles were added to `wanted` while drawing.
@@ -173,6 +197,7 @@ class TiledRenderer {
   /// Calls [_drawFinerChildren] when no coarser level is cached.
   TileDraw _drawFallback(
     ui.Canvas canvas,
+    CanvasDocument document,
     TileKey key,
     ui.Paint p,
     Set<TileKey> wanted,
@@ -184,6 +209,12 @@ class TiledRenderer {
       wanted.add(ancestor);
       final image = tile.image;
       if (image == null) {
+        _drawPendingSplats(
+          canvas,
+          document,
+          TileGrid.rectOf(key),
+          tile.appliedStrokes,
+        );
         frame.blank++;
         return TileDraw.blank;
       }
@@ -201,10 +232,16 @@ class TiledRenderer {
         area,
         p,
       );
+      _drawPendingSplats(
+        canvas,
+        document,
+        TileGrid.rectOf(key),
+        tile.appliedStrokes,
+      );
       frame.fallbackCoarser++;
       return TileDraw.coarser;
     }
-    final drawn = _drawFinerChildren(canvas, key, p, wanted);
+    final drawn = _drawFinerChildren(canvas, document, key, p, wanted);
     switch (drawn) {
       case TileDraw.finer:
         frame.fallbackFiner++;
@@ -220,6 +257,7 @@ class TiledRenderer {
   /// Returns [TileDraw.finer] if anything was drawn, else [TileDraw.missing].
   TileDraw _drawFinerChildren(
     ui.Canvas canvas,
+    CanvasDocument document,
     TileKey key,
     ui.Paint p,
     Set<TileKey> wanted,
@@ -235,15 +273,77 @@ class TiledRenderer {
         found = true;
         wanted.add(child);
         _drawTile(canvas, child, tile!, p);
+        _drawPendingSplats(
+          canvas,
+          document,
+          TileGrid.rectOf(child),
+          tile.appliedStrokes,
+        );
       }
       if (found) return TileDraw.finer;
     }
     return TileDraw.missing;
   }
 
+  /// Retains the just-committed live chunk's already-generated splats in the
+  /// cache so stale tiles can draw them while their replacement is rasterized.
+  void _retainCommittedActive(CanvasDocument document) {
+    final stream = _activeStream;
+    final source = _activeSource;
+    if (stream == null ||
+        source == null ||
+        !identical(_activeDocument, document)) {
+      return;
+    }
+    final index = _activeSeed - 1;
+    if (index < 0 || index >= document.strokeCount) return;
+    if (document.strokeAt(index).seed != _activeSeed) return;
+
+    // The source list is no longer mutated after commit; extend before sharing
+    // the stream's buffers in case no frame recorded its final points.
+    stream.extend(source);
+    final batch = stream.batch;
+    cache.cacheLiveSplats(
+      index,
+      StrokeSplats(batch.count, batch.transforms, batch.colors),
+    );
+  }
+
+  /// Draws ready splats absent from a tile image, clipped to the exact area
+  /// that image covers. Cache replacement makes this overlay unnecessary.
+  void _drawPendingSplats(
+    ui.Canvas canvas,
+    CanvasDocument document,
+    ui.Rect region,
+    int appliedStrokes,
+  ) {
+    if (appliedStrokes >= document.strokeCount) return;
+    canvas.save();
+    canvas.clipRect(region);
+    for (var i = appliedStrokes; i < document.strokeCount; i++) {
+      final stroke = document.strokeAt(i);
+      if (!stroke.bounds.inflate(PencilSplats.inkMargin).overlaps(region)) {
+        continue;
+      }
+      final splats = cache.splatsIfReady(i);
+      if (splats == null || splats.count == 0) continue;
+      canvas.drawRawAtlas(
+        sprite,
+        splats.transforms,
+        _rectsFor(splats.count),
+        splats.colors,
+        ui.BlendMode.modulate,
+        null,
+        _atlasPaint,
+      );
+    }
+    canvas.restore();
+  }
+
   /// Draws the current live chunk from its [SplatStream], extending it with
   /// only the new points each call. Completed chunks enter the tile cache as
-  /// document strokes while the pointer gesture continues.
+  /// document strokes; their generated splats cover stale tiles until the
+  /// asynchronous replacement images land.
   ///
   /// The stream is reset when no chunk is active, when the seed changes, or
   /// when [active] is a different list instance. `CanvasController.activePoints`
@@ -258,6 +358,7 @@ class TiledRenderer {
     if (active.isEmpty) {
       _activeStream = null;
       _activeSource = null;
+      _activeDocument = null;
       return;
     }
     // This chunk becomes the next committed stroke; reuse its seed so the
@@ -266,10 +367,12 @@ class TiledRenderer {
     var stream = _activeStream;
     if (stream == null ||
         _activeSeed != seed ||
-        !identical(_activeSource, active)) {
+        !identical(_activeSource, active) ||
+        !identical(_activeDocument, document)) {
       stream = _activeStream = SplatStream(seed);
       _activeSeed = seed;
       _activeSource = active;
+      _activeDocument = document;
     }
     stream.extend(active);
     final batch = stream.batch;
@@ -281,9 +384,7 @@ class TiledRenderer {
       batch.colors,
       ui.BlendMode.modulate,
       null,
-      ui.Paint()
-        ..isAntiAlias = true
-        ..filterQuality = ui.FilterQuality.medium,
+      _atlasPaint,
     );
   }
 

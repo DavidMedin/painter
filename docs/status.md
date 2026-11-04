@@ -117,8 +117,8 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 
 ## Bounded Active Stroke Chunks Verification (canvas, out-of-roadmap enhancement)
 
-- Direct user request: keep long gestures responsive by committing completed bounded chunks through `CanvasDocument` and `TileCache`, while only the latest chunk remains live. Implemented on branch `feature/stroke-trail-cache`; see [ADR 0009](decisions/0009-bounded-active-stroke-chunks.md). Each gesture is stored as ordinary `CanvasStroke` chunks; the saved-document format is unchanged.
+- Direct user request: keep long gestures responsive by committing completed bounded chunks through `CanvasDocument` and `TileCache`, while keeping the latest chunk live and retaining committed splats over stale tile images until replacements land. Implemented on branch `feature/stroke-trail-cache`; see [ADR 0009](decisions/0009-bounded-active-stroke-chunks.md). Each gesture is stored as ordinary `CanvasStroke` chunks; the saved-document format is unchanged.
 - `flutter analyze` — passed: `No issues found!`.
-- `flutter test` — passed all 90 tests, including synthetic long mouse gestures, bounded controller chunks, and offscreen rendering of the cached trail while the gesture remains active.
+- `flutter test` — passed all 91 tests. The rollover regression compares one trail pixel before chunk commit, while its tile is stale, and after the replacement image lands; it confirmed the trail remains unchanged at all three stages. The regression was observed failing before the continuity overlay fix.
 - Not verified: drawing in the running macOS window, physical stylus behavior, or hardware latency; verification used synthetic Flutter input and offscreen rendering.
 
