@@ -12,12 +12,13 @@
 // ---------------------------------------------------------------------------
 // OVERVIEW: the debug pane
 // ---------------------------------------------------------------------------
-// What it is: a floating tool window, hidden by default and toggled by the
-//   workspace selector or F3 (lib/main.dart), that shows how the tiled texture
-//   cache (ADR 0005) is behaving: which level of detail is drawn, how every
-//   visible tile was drawn (current, stale, coarser/finer fallback, missing,
-//   blank), cache occupancy, build queue, counters, splat memory, and viewport.
-//   It also has overlays drawn inside the canvas and a few controls.
+// What it is: a docked tool pane, shown when a pane's content selector chooses
+//   Diagnostics or when F3 adds a diagnostics pane beside the canvas. It shows
+//   how the tiled texture cache (ADR 0005) is behaving: which level of detail
+//   is drawn, how every visible tile was drawn (current, stale, coarser/finer
+//   fallback, missing, blank), cache occupancy, build queue, counters, splat
+//   memory, and viewport. It also has overlays drawn inside the canvas and a
+//   few controls.
 //
 // Why it exists: the cache is asynchronous and keeps most state private, so
 //   its claims (a stale tile stays visible, a coarser level shows scaled
@@ -56,8 +57,8 @@
 //     (CanvasView's painter) calls paintTileOverlay inside the document
 //     transform. Both the overlay tint and the pane's legend/rows take their
 //     colors from tileDrawColor in tile_overlay.dart.
-//   - Cost: closed, the core still keeps its counters; open, one snapshot
-//     (and a rebuild of this widget) per timer tick.
+//   - Cost: the core keeps its counters at all times; while a diagnostics pane
+//     is visible, one snapshot and widget rebuild occur per timer tick.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -79,7 +80,7 @@ import 'tile_overlay.dart';
 /// size, not a measurement of GPU allocation.
 const int _tileBytes = TileGrid.texturePixels * TileGrid.texturePixels * 4;
 
-/// The tool window that shows the tile cache's internals and exposes a few
+/// The docked tool pane that shows the tile cache's internals and exposes a few
 /// controls. Pure presentation: it reads [renderer] and [controller] and edits
 /// [options] and the cache's limits; it has no state the app depends on.
 ///
@@ -88,23 +89,21 @@ const int _tileBytes = TileGrid.texturePixels * TileGrid.texturePixels * 4;
 /// [CanvasDebugOptions.paused] is set (actions the user takes in the pane
 /// itself still refresh it; see `_refreshNow`).
 ///
-/// Constructed in lib/main.dart when the Diagnostics workspace is selected
-/// and CanvasView has handed back its renderer through `onRenderer`; the system
-/// overview is at the top of this file.
+/// Constructed by lib/main.dart for a Diagnostics pane when the app shell has
+/// a renderer from a Canvas pane; the system overview is at the top of this
+/// file.
 class CanvasDebugPane extends StatefulWidget {
   const CanvasDebugPane({
     super.key,
     required this.renderer,
     required this.controller,
     required this.options,
-    this.onClose,
     this.refresh = const Duration(milliseconds: 250),
   });
 
   final TiledRenderer renderer;
   final CanvasController controller;
   final CanvasDebugOptions options;
-  final VoidCallback? onClose;
   final Duration refresh;
 
   @override
@@ -188,241 +187,250 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
     final r = _reading;
     final cache = widget.renderer.cache;
     final options = widget.options;
-    return ImWindow(
-      title: 'Painter debug  [F3]',
-      initialOffset: const Offset(12, 12),
-      width: 340,
-      onClose: widget.onClose,
-      children: [
-        // Frame: TileFrameStats level, recordMillis, activeSplats, and the
-        // TiledRenderer.recordHistory plot. `record time` is UI-thread time
-        // spent recording draw calls, not raster or GPU time (ADR 0006).
-        ImSection(
-          title: 'Frame',
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: ImTheme.windowBg),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(ImTheme.padding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ImValue(
-              'level of detail',
-              'L${r.frame.level}  (${r.scale} px/unit)',
+            ImText('Tile cache diagnostics', color: ImTheme.text),
+            // Frame: TileFrameStats level, recordMillis, activeSplats, and the
+            // TiledRenderer.recordHistory plot. `record time` is UI-thread time
+            // spent recording draw calls, not raster or GPU time (ADR 0006).
+            ImSection(
+              title: 'Frame',
+              children: [
+                ImValue(
+                  'level of detail',
+                  'L${r.frame.level}  (${r.scale} px/unit)',
+                ),
+                ImValue(
+                  'record time',
+                  '${r.frame.recordMillis.toStringAsFixed(3)} ms',
+                  color: _budget(r.frame.recordMillis),
+                ),
+                ImValue('active chunk splats', '${r.frame.activeSplats}'),
+                ImPlot(
+                  label: 'record ms',
+                  samples: r.recordHistory,
+                  unit: 'ms',
+                ),
+              ],
             ),
-            ImValue(
-              'record time',
-              '${r.frame.recordMillis.toStringAsFixed(3)} ms',
-              color: _budget(r.frame.recordMillis),
+            // Viewport: CanvasController zoom/rotation/pan plus the size of
+            // TileFrameStats.visibleRect. "Reset view" calls
+            // CanvasController.resetViewport().
+            ImSection(
+              title: 'Viewport',
+              children: [
+                ImValue('zoom', r.zoom.toStringAsFixed(3)),
+                ImValue(
+                  'rotation',
+                  '${(r.rotation * 180 / math.pi).toStringAsFixed(1)}\u00B0',
+                ),
+                ImValue(
+                  'pan',
+                  '${r.pan.dx.toStringAsFixed(1)}, ${r.pan.dy.toStringAsFixed(1)}',
+                ),
+                ImValue(
+                  'visible (doc units)',
+                  '${r.frame.visibleRect.width.toStringAsFixed(0)} x '
+                      '${r.frame.visibleRect.height.toStringAsFixed(0)}',
+                ),
+                ImButton(
+                  icon: Icons.center_focus_strong,
+                  label: 'Reset view',
+                  topic: HelpTopics.resetView,
+                  onPressed: () {
+                    widget.controller.resetViewport();
+                    _refreshNow();
+                  },
+                ),
+              ],
             ),
-            ImValue('active chunk splats', '${r.frame.activeSplats}'),
-            ImPlot(label: 'record ms', samples: r.recordHistory, unit: 'ms'),
-          ],
-        ),
-        // Viewport: CanvasController zoom/rotation/pan plus the size of
-        // TileFrameStats.visibleRect. "Reset view" calls
-        // CanvasController.resetViewport().
-        ImSection(
-          title: 'Viewport',
-          children: [
-            ImValue('zoom', r.zoom.toStringAsFixed(3)),
-            ImValue(
-              'rotation',
-              '${(r.rotation * 180 / math.pi).toStringAsFixed(1)}\u00B0',
-            ),
-            ImValue(
-              'pan',
-              '${r.pan.dx.toStringAsFixed(1)}, ${r.pan.dy.toStringAsFixed(1)}',
-            ),
-            ImValue(
-              'visible (doc units)',
-              '${r.frame.visibleRect.width.toStringAsFixed(0)} x '
-                  '${r.frame.visibleRect.height.toStringAsFixed(0)}',
-            ),
-            ImButton(
-              icon: Icons.center_focus_strong,
-              label: 'Reset view',
-              topic: HelpTopics.resetView,
-              onPressed: () {
-                widget.controller.resetViewport();
-                _refreshNow();
-              },
-            ),
-          ],
-        ),
-        // Visible tiles: how the last frame drew each visible tile. Counts
-        // are TileFrameStats.visible and the per-state totals (drawnCurrent,
-        // drawnStale, fallbackCoarser, fallbackFiner, missing, blank), via
-        // [_Reading.draws]. The bar and rows take color and name from
-        // tileDrawColor / tileDrawName (tile_overlay.dart), the same
-        // functions the canvas overlay uses.
-        ImSection(
-          title: 'Visible tiles',
-          children: [
-            ImValue('visible', '${r.frame.visible}'),
-            ImStackedBar(
-              segments: [
+            // Visible tiles: how the last frame drew each visible tile. Counts
+            // are TileFrameStats.visible and the per-state totals (drawnCurrent,
+            // drawnStale, fallbackCoarser, fallbackFiner, missing, blank), via
+            // [_Reading.draws]. The bar and rows take color and name from
+            // tileDrawColor / tileDrawName (tile_overlay.dart), the same
+            // functions the canvas overlay uses.
+            ImSection(
+              title: 'Visible tiles',
+              children: [
+                ImValue('visible', '${r.frame.visible}'),
+                ImStackedBar(
+                  segments: [
+                    for (final d in TileDraw.values)
+                      ImSegment(
+                        r.drawCount(d).toDouble(),
+                        tileDrawColor(d),
+                        tileDrawName(d),
+                      ),
+                  ],
+                ),
                 for (final d in TileDraw.values)
-                  ImSegment(
-                    r.drawCount(d).toDouble(),
-                    tileDrawColor(d),
+                  ImValue(
                     tileDrawName(d),
+                    '${r.drawCount(d)}',
+                    color: tileDrawColor(d),
                   ),
               ],
             ),
-            for (final d in TileDraw.values)
-              ImValue(
-                tileDrawName(d),
-                '${r.drawCount(d)}',
-                color: tileDrawColor(d),
-              ),
+            // Tile cache: TileCache getters cachedTiles, imageTiles, wantedTiles,
+            // building, queued, idle, plus maxTiles/maxInFlight and the
+            // TileCacheCounters fields. "cached tiles" can exceed its maxTiles
+            // denominator: maxTiles is a floor of the eviction budget, not a hard
+            // cap (see TileCache.maxTiles). "texture memory" is imageTiles times
+            // _tileBytes (tiles without an image take no texture). `buildHistory`
+            // is TileCacheCounters.buildMillis, which excludes skipped builds.
+            ImSection(
+              title: 'Tile cache',
+              children: [
+                ImValue('cached tiles', '${r.cached} / ${r.maxTiles}'),
+                ImValue('with image', '${r.imageTiles}'),
+                ImValue('texture memory', _bytes(r.imageTiles * _tileBytes)),
+                ImValue('working set', '${r.wanted}'),
+                ImValue('evictions', '${r.counters.evictions}'),
+                ImSeparator(),
+                ImValue(
+                  'building',
+                  '${r.building} / ${r.maxInFlight}',
+                  color: r.building > 0 ? ImTheme.warn : null,
+                ),
+                ImValue(
+                  'queued',
+                  '${r.queued}',
+                  color: r.queued > 0 ? ImTheme.warn : null,
+                ),
+                ImValue(
+                  'idle',
+                  r.idle ? 'yes' : 'no',
+                  color: r.idle ? ImTheme.good : ImTheme.warn,
+                ),
+                ImSeparator(),
+                ImValue('requests', '${r.counters.requests}'),
+                ImValue('dropped from queue', '${r.counters.droppedFromQueue}'),
+                ImValue('builds', '${r.counters.builds}'),
+                ImValue('  full', '${r.counters.fullBuilds}'),
+                ImValue('  incremental', '${r.counters.incrementalBuilds}'),
+                ImValue('  skipped (no ink)', '${r.counters.skippedBuilds}'),
+                ImPlot(
+                  label: 'tile build',
+                  samples: r.buildHistory,
+                  unit: 'ms',
+                ),
+              ],
+            ),
+            // Document and splats: strokes/points from the document; the rest are
+            // TileCache.generatedStrokes / splatBytes and the splatsGenerated /
+            // splatsRastered counters. The last row prints the two PencilSplats
+            // constants (splatsPerSample / sampleSpacing).
+            ImSection(
+              title: 'Document and splats',
+              initiallyOpen: false,
+              children: [
+                ImValue('strokes', '${r.strokes}'),
+                ImValue('points', '${r.points}'),
+                ImValue('strokes with splats', '${r.generatedStrokes}'),
+                ImValue('splats generated', '${r.counters.splatsGenerated}'),
+                ImValue('splats rastered', '${r.counters.splatsRastered}'),
+                ImValue('splat memory', _bytes(r.splatBytes)),
+                ImValue(
+                  'splats / unit of stroke',
+                  '${PencilSplats.splatsPerSample} / ${PencilSplats.sampleSpacing}',
+                ),
+              ],
+            ),
+            // Overlays: writes CanvasDebugOptions switches; the canvas paints
+            // them via paintTileOverlay (tile_overlay.dart). The legend uses the
+            // same tileDrawColor/tileDrawName as that overlay.
+            ImSection(
+              title: 'Overlays',
+              children: [
+                ImCheckbox(
+                  label: 'tile state tint',
+                  value: options.showTileState,
+                  onChanged: (v) => options.showTileState = v,
+                ),
+                if (options.showTileState)
+                  ImLegend([
+                    for (final d in TileDraw.values)
+                      (tileDrawColor(d), tileDrawName(d)),
+                  ]),
+                ImCheckbox(
+                  label: 'tile grid',
+                  value: options.showTileGrid,
+                  onChanged: (v) => options.showTileGrid = v,
+                ),
+                ImCheckbox(
+                  label: 'tile coordinates',
+                  value: options.showCoordinates,
+                  onChanged: (v) => options.showCoordinates = v,
+                ),
+                ImCheckbox(
+                  label: 'visible rectangle',
+                  value: options.showVisibleRect,
+                  onChanged: (v) => options.showVisibleRect = v,
+                ),
+              ],
+            ),
+            // Controls: the only section that writes to the core. The sliders
+            // read the live `cache.maxInFlight` / `cache.maxTiles`, not the
+            // snapshot, so the thumb follows the pointer at once; the "Tile
+            // cache" readout rows come from the snapshot. Lowering `maxTiles`
+            // evicts on the next completed build, not instantly (ADR 0006).
+            // `invalidateAll()` drops all tiles and splats but keeps the document;
+            // the canvas rebuilds them on the next frame.
+            ImSection(
+              title: 'Controls',
+              children: [
+                ImSliderInt(
+                  label: 'max in flight',
+                  value: cache.maxInFlight,
+                  min: 1,
+                  max: 8,
+                  onChanged: (v) {
+                    cache.maxInFlight = v;
+                    _refreshNow();
+                  },
+                ),
+                ImSliderInt(
+                  label: 'max tiles',
+                  value: cache.maxTiles,
+                  min: 16,
+                  max: 1024,
+                  onChanged: (v) {
+                    cache.maxTiles = v;
+                    _refreshNow();
+                  },
+                ),
+                ImCheckbox(
+                  label: 'pause readouts',
+                  value: options.paused,
+                  onChanged: (v) => options.paused = v,
+                ),
+                ImButton(
+                  icon: Icons.refresh,
+                  label: 'Discard all tiles (rebuild)',
+                  topic: HelpTopics.rebuildTiles,
+                  onPressed: () {
+                    cache.invalidateAll();
+                    _refreshNow();
+                  },
+                ),
+                ImButton(
+                  icon: Icons.copy_all,
+                  label: 'Copy report',
+                  topic: HelpTopics.copyReport,
+                  onPressed: _copyReport,
+                ),
+                if (_notice != null) ImText(_notice!, color: ImTheme.good),
+              ],
+            ),
           ],
         ),
-        // Tile cache: TileCache getters cachedTiles, imageTiles, wantedTiles,
-        // building, queued, idle, plus maxTiles/maxInFlight and the
-        // TileCacheCounters fields. "cached tiles" can exceed its maxTiles
-        // denominator: maxTiles is a floor of the eviction budget, not a hard
-        // cap (see TileCache.maxTiles). "texture memory" is imageTiles times
-        // _tileBytes (tiles without an image take no texture). `buildHistory`
-        // is TileCacheCounters.buildMillis, which excludes skipped builds.
-        ImSection(
-          title: 'Tile cache',
-          children: [
-            ImValue('cached tiles', '${r.cached} / ${r.maxTiles}'),
-            ImValue('with image', '${r.imageTiles}'),
-            ImValue('texture memory', _bytes(r.imageTiles * _tileBytes)),
-            ImValue('working set', '${r.wanted}'),
-            ImValue('evictions', '${r.counters.evictions}'),
-            ImSeparator(),
-            ImValue(
-              'building',
-              '${r.building} / ${r.maxInFlight}',
-              color: r.building > 0 ? ImTheme.warn : null,
-            ),
-            ImValue(
-              'queued',
-              '${r.queued}',
-              color: r.queued > 0 ? ImTheme.warn : null,
-            ),
-            ImValue(
-              'idle',
-              r.idle ? 'yes' : 'no',
-              color: r.idle ? ImTheme.good : ImTheme.warn,
-            ),
-            ImSeparator(),
-            ImValue('requests', '${r.counters.requests}'),
-            ImValue('dropped from queue', '${r.counters.droppedFromQueue}'),
-            ImValue('builds', '${r.counters.builds}'),
-            ImValue('  full', '${r.counters.fullBuilds}'),
-            ImValue('  incremental', '${r.counters.incrementalBuilds}'),
-            ImValue('  skipped (no ink)', '${r.counters.skippedBuilds}'),
-            ImPlot(label: 'tile build', samples: r.buildHistory, unit: 'ms'),
-          ],
-        ),
-        // Document and splats: strokes/points from the document; the rest are
-        // TileCache.generatedStrokes / splatBytes and the splatsGenerated /
-        // splatsRastered counters. The last row prints the two PencilSplats
-        // constants (splatsPerSample / sampleSpacing).
-        ImSection(
-          title: 'Document and splats',
-          initiallyOpen: false,
-          children: [
-            ImValue('strokes', '${r.strokes}'),
-            ImValue('points', '${r.points}'),
-            ImValue('strokes with splats', '${r.generatedStrokes}'),
-            ImValue('splats generated', '${r.counters.splatsGenerated}'),
-            ImValue('splats rastered', '${r.counters.splatsRastered}'),
-            ImValue('splat memory', _bytes(r.splatBytes)),
-            ImValue(
-              'splats / unit of stroke',
-              '${PencilSplats.splatsPerSample} / ${PencilSplats.sampleSpacing}',
-            ),
-          ],
-        ),
-        // Overlays: writes CanvasDebugOptions switches; the canvas paints
-        // them via paintTileOverlay (tile_overlay.dart). The legend uses the
-        // same tileDrawColor/tileDrawName as that overlay.
-        ImSection(
-          title: 'Overlays',
-          children: [
-            ImCheckbox(
-              label: 'tile state tint',
-              value: options.showTileState,
-              onChanged: (v) => options.showTileState = v,
-            ),
-            if (options.showTileState)
-              ImLegend([
-                for (final d in TileDraw.values)
-                  (tileDrawColor(d), tileDrawName(d)),
-              ]),
-            ImCheckbox(
-              label: 'tile grid',
-              value: options.showTileGrid,
-              onChanged: (v) => options.showTileGrid = v,
-            ),
-            ImCheckbox(
-              label: 'tile coordinates',
-              value: options.showCoordinates,
-              onChanged: (v) => options.showCoordinates = v,
-            ),
-            ImCheckbox(
-              label: 'visible rectangle',
-              value: options.showVisibleRect,
-              onChanged: (v) => options.showVisibleRect = v,
-            ),
-          ],
-        ),
-        // Controls: the only section that writes to the core. The sliders
-        // read the live `cache.maxInFlight` / `cache.maxTiles`, not the
-        // snapshot, so the thumb follows the pointer at once; the "Tile
-        // cache" readout rows come from the snapshot. Lowering `maxTiles`
-        // evicts on the next completed build, not instantly (ADR 0006).
-        // `invalidateAll()` drops all tiles and splats but keeps the document;
-        // the canvas rebuilds them on the next frame.
-        ImSection(
-          title: 'Controls',
-          children: [
-            ImSliderInt(
-              label: 'max in flight',
-              value: cache.maxInFlight,
-              min: 1,
-              max: 8,
-              onChanged: (v) {
-                cache.maxInFlight = v;
-                _refreshNow();
-              },
-            ),
-            ImSliderInt(
-              label: 'max tiles',
-              value: cache.maxTiles,
-              min: 16,
-              max: 1024,
-              onChanged: (v) {
-                cache.maxTiles = v;
-                _refreshNow();
-              },
-            ),
-            ImCheckbox(
-              label: 'pause readouts',
-              value: options.paused,
-              onChanged: (v) => options.paused = v,
-            ),
-            ImButton(
-              icon: Icons.refresh,
-              label: 'Discard all tiles (rebuild)',
-              topic: HelpTopics.rebuildTiles,
-              onPressed: () {
-                cache.invalidateAll();
-                _refreshNow();
-              },
-            ),
-            ImButton(
-              icon: Icons.copy_all,
-              label: 'Copy report',
-              topic: HelpTopics.copyReport,
-              onPressed: _copyReport,
-            ),
-            if (_notice != null) ImText(_notice!, color: ImTheme.good),
-          ],
-        ),
-        // Tail hint; the title-bar double-tap behavior is ImWindow's
-        // (imgui.dart).
-        ImText('double-click title to collapse', dim: true),
-      ],
+      ),
     );
   }
 

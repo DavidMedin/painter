@@ -1,4 +1,4 @@
-// What: A small widget kit that imitates Dear ImGui's look: ImTheme, ImWindow,
+// What: A small widget kit that imitates Dear ImGui's look: ImTheme,
 //   ImSection, ImValue, ImText, ImSeparator, ImCheckbox, ImButton,
 //   ImSliderInt, ImPlot, ImStackedBar (with ImSegment), ImLegend, and imCopy.
 //   This file is also where the kit's system overview lives (below).
@@ -12,12 +12,11 @@
 // ---------------------------------------------------------------------------
 // OVERVIEW: the ImGui-style widget kit
 // ---------------------------------------------------------------------------
-// What it is: a set of ordinary retained Flutter widgets that look like Dear
-//   ImGui: a flat, monospace, dark, dense UI. It has a floating window
-//   (ImWindow) with a title bar that drags, collapses, and optionally closes;
-//   tree-style collapsible sections (ImSection); one-line widgets (ImValue
-//   label/value rows, ImText, ImSeparator, ImCheckbox, ImButton, ImSliderInt);
-//   and small visualisations (ImPlot line plot, ImStackedBar + ImLegend).
+// What it is: a set of ordinary retained Flutter widgets with a flat,
+//   monospace, dark, dense UI: tree-style collapsible sections (ImSection),
+//   one-line widgets (ImValue label/value rows, ImText, ImSeparator,
+//   ImCheckbox, ImButton, ImSliderInt), and small visualisations (ImPlot line
+//   plot, ImStackedBar + ImLegend).
 //
 // Why it exists: ADR 0006 wanted the tile cache's internals visible in the
 //   running app in an "immediate-mode look". The ADR states the kit is NOT an
@@ -27,23 +26,17 @@
 //
 // How it works:
 //   - Retained, not immediate: the caller builds a normal widget tree every
-//     time its state changes. The kit keeps only UI state (window offset and
-//     collapsed flag, section open flag, hover flags). Values, checkbox
-//     states, and slider positions are owned by the caller and passed in; a
-//     widget reports changes through onChanged / onPressed.
-//   - Windows: ImWindow fills its parent Stack to measure it, then places a
-//     fixed-width panel at a stored offset. Dragging the title bar updates the
-//     offset, always clamped so the whole title bar (and close button) stays
-//     inside the container, even after the container is resized. Content is a
-//     SingleChildScrollView limited by maxHeight.
+//     time its state changes. The kit keeps only widget-local UI state such as
+//     section open flags and hover feedback. Values, checkbox states, and
+//     slider positions are owned by the caller and passed in; a widget reports
+//     changes through onChanged / onPressed.
 //   - Sections: ImSection keeps its open flag in State, so it survives parent
 //     rebuilds (the pane rebuilds every refresh).
 //   - Plots: ImPlot paints the samples with a CustomPainter, scaled to the
 //     largest sample unless scaleMax is given, and prints min/avg/max under
 //     it. ImStackedBar normalises its segments' weights into flex widths.
-//   - Accessibility: each widget wraps itself in Semantics with a text label
-//     (windows, buttons, checkbox, slider increase/decrease, plot summary), so
-//     widget tests can find controls by label.
+//   - Accessibility: interactive widgets expose text labels through Semantics,
+//     so tests and assistive technologies can find their controls.
 //   - Painter-agnostic: nothing here imports the canvas or painter code. The
 //     only coupling is by callers: canvas_debug_pane.dart composes these
 //     widgets, and tile_overlay.dart borrows ImTheme colors so overlay tints
@@ -66,14 +59,12 @@ class ImTheme {
   const ImTheme._();
 
   static const Color windowBg = Color(0xF0151518);
-  static const Color titleBg = Color(0xFF0A0A0C);
-  static const Color titleActive = Color(0xFF29477A);
-  static const Color border = Color(0xFF6E6E80);
   static const Color header = Color(0xFF2F4F80);
   static const Color headerHover = Color(0xFF3D6CB3);
   static const Color frameBg = Color(0xFF29292E);
   static const Color frameHover = Color(0xFF3B5E96);
   static const Color accent = Color(0xFF4296FA);
+  static const Color border = Color(0xFF6E6E80);
   static const Color text = Color(0xFFF2F2F2);
   static const Color textDim = Color(0xFF8A8A92);
   static const Color good = Color(0xFF6BD66B);
@@ -103,204 +94,10 @@ class ImTheme {
   static TextStyle get dim => style.copyWith(color: textDim);
 }
 
-/// A floating, draggable, collapsible tool window of fixed [width].
-///
-/// Place it inside a [Stack]; it positions itself with its own offset and moves
-/// when its title bar is dragged, staying inside the Stack's bounds. Collapse
-/// by tapping the arrow or double-tapping the title text. The title bar's
-/// gesture layout (and why the double-tap recognizer is on the text only) is
-/// explained in [_ImWindowState._titleBar].
-class ImWindow extends StatefulWidget {
-  const ImWindow({
-    super.key,
-    required this.title,
-    required this.children,
-    this.initialOffset = const Offset(12, 12),
-    this.width = 320,
-    this.maxHeight,
-    this.onClose,
-  });
-
-  final String title;
-  final List<Widget> children;
-  final Offset initialOffset;
-  final double width;
-
-  /// Content scrolls beyond this height. When null the window uses the room
-  /// left in its container below the window's top edge (at least 80 logical
-  /// pixels), so a tall pane scrolls instead of running off screen.
-  final double? maxHeight;
-
-  /// When non-null a close button is shown in the title bar and calls this.
-  /// The window does not hide itself; the owner removes it from the tree
-  /// (see CanvasDebugPane.onClose, wired to the Diagnostics workspace and F3
-  /// shortcut in lib/main.dart).
-  final VoidCallback? onClose;
-
-  @override
-  State<ImWindow> createState() => _ImWindowState();
-}
-
-class _ImWindowState extends State<ImWindow> {
-  late Offset _offset = widget.initialOffset;
-  bool _collapsed = false;
-
-  // Size of the area the window floats in, from the latest layout. Dragging
-  // clamps against it so the stored offset never drifts off screen. Starts
-  // infinite (no clamping) until the first layout measures the container.
-  Size _bounds = Size.infinite;
-
-  /// Keeps the whole title bar (and its close button) inside [bounds], even
-  /// after the window or its container is resized. A window wider than its
-  /// container is pinned to the left edge.
-  Offset _clamped(Offset offset, Size bounds, double titleBarHeight) {
-    final maxX = bounds.width.isFinite
-        ? math.max(0.0, bounds.width - widget.width)
-        : double.infinity;
-    final maxY = bounds.height.isFinite
-        ? math.max(0.0, bounds.height - titleBarHeight)
-        : double.infinity;
-    return Offset(
-      offset.dx.clamp(0.0, maxX).toDouble(),
-      offset.dy.clamp(0.0, maxY).toDouble(),
-    );
-  }
-
-  /// Fills the parent [Stack] (Positioned.fill + LayoutBuilder) purely to
-  /// learn its size, then places the window inside it at the clamped offset.
-  /// The measured size is kept in [_bounds] so drag updates clamp against the
-  /// same area that was last laid out.
-  @override
-  Widget build(BuildContext context) {
-    // Fill the parent Stack so we can measure it, then place the window inside.
-    return Positioned.fill(
-      child: LayoutBuilder(
-        builder: (context, box) {
-          _bounds = box.biggest;
-          final titleBarHeight = TouchTargetSettings.height(context) + 2;
-          final position = _clamped(_offset, _bounds, titleBarHeight);
-          final maxHeight =
-              widget.maxHeight ??
-              math.max(80.0, _bounds.height - position.dy - titleBarHeight);
-          return Stack(
-            children: [
-              Positioned(
-                left: position.dx,
-                top: position.dy,
-                width: widget.width,
-                child: _window(maxHeight),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  /// The visible panel: border, title bar, and (unless collapsed) a scrollable
-  /// content column capped at [maxHeight]. When collapsed the children are not
-  /// built at all, which discards the State of widgets inside (see
-  /// [ImSection]).
-  Widget _window(double maxHeight) {
-    return Semantics(
-      label: 'Debug window ${widget.title}',
-      container: true,
-      child: Container(
-        decoration: BoxDecoration(
-          color: ImTheme.windowBg,
-          border: Border.all(color: ImTheme.border.withValues(alpha: 0.5)),
-        ),
-        child: DefaultTextStyle(
-          style: ImTheme.style,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _titleBar(),
-              if (!_collapsed)
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: maxHeight),
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(ImTheme.padding),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: widget.children,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Title bar: shared action buttons, a drag handle, and a double-tap title.
-  ///
-  /// Dragging uses the whole bar (onPanUpdate, clamped by [_clamped]). The
-  /// collapse and close actions use [PainterActionButton]; double-tap is
-  /// attached only to the title text so single taps on the actions are not
-  /// delayed by the gesture recognizer (ADR 0006, Consequences).
-  Widget _titleBar() {
-    final targetHeight = TouchTargetSettings.height(context);
-    final titleBarHeight = targetHeight + 2;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onPanUpdate: (d) => setState(
-        () => _offset = _clamped(_offset + d.delta, _bounds, titleBarHeight),
-      ),
-      child: Container(
-        height: titleBarHeight,
-        color: _collapsed ? ImTheme.titleBg : ImTheme.titleActive,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Row(
-          children: [
-            PainterActionButton(
-              icon: _collapsed ? Icons.expand_more : Icons.expand_less,
-              label: _collapsed ? 'Expand' : 'Collapse',
-              topic: HelpTopics.windowCollapse,
-              background: ImTheme.titleBg,
-              foreground: ImTheme.text,
-              minimumHeight: targetHeight,
-              onPressed: () => setState(() => _collapsed = !_collapsed),
-            ),
-            Expanded(
-              child: HelpTarget(
-                topic: HelpTopics.diagnostics,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onDoubleTap: () => setState(() => _collapsed = !_collapsed),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(widget.title, overflow: TextOverflow.ellipsis),
-                  ),
-                ),
-              ),
-            ),
-            if (widget.onClose != null)
-              PainterActionButton(
-                icon: Icons.close,
-                label: 'Close',
-                topic: HelpTopics.windowClose,
-                background: ImTheme.titleBg,
-                foreground: ImTheme.text,
-                minimumHeight: targetHeight,
-                onPressed: widget.onClose,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// A collapsible `CollapsingHeader` / `TreeNode`. State survives rebuilds.
 ///
-/// The open flag lives in this widget's State, so the pane's periodic
-/// rebuilds (canvas_debug_pane.dart) do not reset it. It does NOT survive
-/// the enclosing [ImWindow] being collapsed: a collapsed window drops its
-/// content subtree, so sections inside restart at [initiallyOpen] when the
-/// window is expanded again.
+/// The open flag lives in this widget's State, so periodic diagnostics refreshes
+/// do not reset it.
 class ImSection extends StatefulWidget {
   const ImSection({
     super.key,
@@ -405,7 +202,15 @@ class ImValue extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Text(value, style: ImTheme.style.copyWith(color: color)),
+            Flexible(
+              child: Text(
+                value,
+                style: ImTheme.style.copyWith(color: color),
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
+                softWrap: false,
+              ),
+            ),
           ],
         ),
       ),

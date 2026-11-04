@@ -26,28 +26,36 @@
 - **Wiring:** `PainterApp` in `lib/main.dart` owns the current document path and in-flight file-operation state, and shows a details-expandable error dialog on failure without replacing the current document or crashing.
 - **Evidence and record:** because picking is ordinary Flutter UI, `flutter test` drives and verifies the full open/save flow headlessly, including the picker dialog itself (navigate, type a name, confirm, cancel); no native dialog, VM, or file-picker plugin dependency is required.
 
-## Debug Pane (developer tool)
+## Docked pane system and diagnostics
 
-- **Purpose:** show the tile cache's internals in the running app and expose a few controls. Hidden by default (the app still opens to the blank canvas); the workspace selector offers the diagnostics arrangement, and `F3` switches the same content. See [ADR 0006](decisions/0006-debug-pane.md).
-- **Layers:** `lib/debug/imgui.dart` is a reusable, painter-agnostic widget kit in the style of Dear ImGui (window, collapsible sections, rows, checkbox, button, integer slider, plot, stacked bar). `lib/debug/canvas_debug_pane.dart` composes it into the pane; `lib/debug/tile_overlay.dart` paints canvas overlays; `CanvasDebugOptions` carries the overlay switches.
-- **Boundary:** the core (`TileCache`, `TiledRenderer`, `lib/canvas/tile_stats.dart`) only records counters and per-frame tile classification and never imports debug UI. The pane reads one frozen snapshot per refresh and writes only `maxInFlight`, `maxTiles`, `invalidateAll()`, `resetViewport()`, and the overlay switches.
-- **Evidence:** unit tests drive a real `TiledRenderer` to check the per-frame classification and counters; widget tests cover the kit and the pane in the real `PainterApp` (toggle, live numbers, pause, controls, overlays, report, no interference with drawing).
-
-## Application controls and workspaces
-
-- **Controls:** `lib/ui/painter_action_button.dart` supplies the shared labeled
-  action style; `lib/help/contextual_help.dart` catalogs hover hints and F1
-  articles. F1 chooses hovered help, then keyboard-focused help, then general
-  help. These scopes wrap Navigator so modal routes inherit help and sizing.
-  The workspace selector presents only the existing canvas and diagnostics
-  arrangements.
-- **Touch sizing:** `TouchTargetSettings` in
-  `lib/ui/touch_target_settings.dart` provides app-wide 48-logical-pixel
-  standard and 56-logical-pixel enlarged minimum heights. The in-session
-  switch is in the AppBar.
-- **Evidence and record:** widget tests cover workspace selection, F1 opening
-  help for hovered canvas and modal-dialog controls, touch target sizing, and
-  help-topic precedence. See [ADR 0008](decisions/0008-discoverable-controls-workspaces-and-touch-targets.md).
+- **Pane layout:** `lib/ui/pane_system.dart` owns pane ids, Canvas/Diagnostics
+  selections, horizontal split weights, focus, and draggable dividers. The app
+  starts with one Canvas; each pane has a top-left content selector, Split, and
+  (when another pane remains) Close. F3 adds Diagnostics beside Canvas and
+  removes it on the next press; a sole Diagnostics pane becomes Canvas.
+  See [ADR 0010](decisions/0010-pane-system.md).
+- **Content ownership:** `PainterApp` builds a `CanvasView` and owns its
+  `TiledRenderer` for each Canvas pane. Diagnostics reads the first Canvas
+  pane's renderer and explains when none exists. `CanvasDebugPane` is scrollable
+  content inside the pane; it is not a floating window.
+- **Diagnostics:** `lib/debug/imgui.dart` is a reusable, painter-agnostic widget
+  kit in the style of Dear ImGui (collapsible sections, rows, checkbox, button,
+  integer slider, plot, stacked bar). `lib/debug/tile_overlay.dart` paints
+  canvas overlays; `CanvasDebugOptions` carries the overlay switches.
+- **Boundary:** the core (`TileCache`, `TiledRenderer`, `lib/canvas/tile_stats.dart`)
+  only records counters and per-frame tile classification and never imports
+  debug UI. The pane reads one frozen snapshot per refresh and writes only
+  `maxInFlight`, `maxTiles`, `invalidateAll()`, `resetViewport()`, and overlay
+  switches. ADR 0006 defines the diagnostics data and controls; ADR 0010
+  supersedes its former floating-window placement.
+- **Controls and touch sizing:** `lib/ui/painter_action_button.dart` supplies
+  labeled actions; `lib/help/contextual_help.dart` catalogs hover hints and F1
+  articles. F1 prefers hovered help, then keyboard focus, then general help.
+  `TouchTargetSettings` provides app-wide 48-logical-pixel standard and
+  56-logical-pixel enlarged minimum heights.
+- **Evidence:** widget tests cover content selection, split, resize, close, F3
+  docking, live diagnostics, pause, controls, overlays, reports, and continued
+  canvas drawing. macOS window appearance is not verified.
 
 ## Code Documentation
 

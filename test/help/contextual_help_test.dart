@@ -14,8 +14,8 @@ void main() {
     state.setFocused(HelpTopics.openDocument);
     expect(state.activeTopic, HelpTopics.openDocument);
 
-    state.setHovered(HelpTopics.workspace);
-    expect(state.activeTopic, HelpTopics.workspace);
+    state.setHovered(HelpTopics.paneType);
+    expect(state.activeTopic, HelpTopics.paneType);
 
     state.setHovered(null);
     expect(state.activeTopic, HelpTopics.openDocument);

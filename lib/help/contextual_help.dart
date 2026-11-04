@@ -43,8 +43,9 @@ class HelpTopics {
     title: 'Painter help',
     tooltip: 'Open help for the current control',
     description:
-        'Choose a workspace, draw and navigate the canvas, or open and save '
-        'Painter documents. Hover a control and press F1 for its help.',
+        'Choose pane contents, split or close panes, draw and navigate the '
+        'canvas, or open and save Painter documents. Hover a control and press '
+        'F1 for its help.',
   );
   static const canvas = HelpTopic(
     title: 'Canvas',
@@ -68,12 +69,26 @@ class HelpTopics {
         'Choose a destination the first time you save. Later saves write to '
         'the associated file.',
   );
-  static const workspace = HelpTopic(
-    title: 'Workspace selector',
-    tooltip: 'Choose which workspace content is visible',
+  static const paneType = HelpTopic(
+    title: 'Pane content selector',
+    tooltip: 'Choose this pane’s content',
     description:
-        'Canvas shows the painting surface. Canvas + tile diagnostics adds '
-        'the developer diagnostics window over the canvas.',
+        'Choose Canvas for painting or Diagnostics for tile-cache readouts. '
+        'Each pane has its own selector at the top-left.',
+  );
+  static const splitPane = HelpTopic(
+    title: 'Split pane',
+    tooltip: 'Add a neighboring pane',
+    description:
+        'Split this pane to add a neighboring pane. The new pane starts with '
+        'the other implemented content type; drag the divider to resize.',
+  );
+  static const closePane = HelpTopic(
+    title: 'Close pane',
+    tooltip: 'Remove this pane',
+    description:
+        'Remove this pane and give its space to a neighbor. At least one pane '
+        'always remains.',
   );
   static const touchTargets = HelpTopic(
     title: 'Touch target size',
@@ -130,23 +145,6 @@ class HelpTopics {
     title: 'Error details',
     tooltip: 'Show or hide the error details',
     description: 'Expand the error details to inspect the operation failure.',
-  );
-  static const diagnostics = HelpTopic(
-    title: 'Tile diagnostics',
-    tooltip: 'Show tile-cache diagnostics',
-    description:
-        'Show or hide the diagnostics window for tile rendering and cache '
-        'behavior. F3 toggles this workspace content.',
-  );
-  static const windowCollapse = HelpTopic(
-    title: 'Collapse diagnostics window',
-    tooltip: 'Hide or show diagnostic controls',
-    description: 'Collapse the window contents or expand them again.',
-  );
-  static const windowClose = HelpTopic(
-    title: 'Close diagnostics window',
-    tooltip: 'Hide the diagnostics window',
-    description: 'Hide the developer diagnostics without changing the canvas.',
   );
   static const debugSection = HelpTopic(
     title: 'Diagnostic section',

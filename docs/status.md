@@ -82,6 +82,7 @@
 - A throwaway test (deleted) rendered the real `PainterApp` offscreen to a PNG with the pane open and every overlay on, and the image was inspected: sections, plot, legend, tile tints, grid, coordinates, and the visible rectangle all rendered, with the pencil stroke drawn through them. Test renders use the Ahem font, so glyph shapes and the Menlo typeface were not seen.
 - `flutter build macos` — passed; built `build/macos/Build/Products/Release/painter.app` (42.3 MB).
 - Not verified: the pane in the running macOS window (no windowed run was permitted by [testing.md](testing.md)); the overhead of the always-on counters (not benchmarked); readouts show UI-thread recording times, not raster or GPU time.
+- Later, [ADR 0010](decisions/0010-pane-system.md) replaced the floating `ImWindow` presentation. The window-specific drag, clamp, collapse, and close findings above are historical; current behavior is verified under the docked pane system below.
 
 ## Code Comments Verification (documentation-only, out-of-roadmap)
 
@@ -106,6 +107,7 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 - `flutter analyze` — passed: `No issues found!`.
 - `flutter build macos --release` — passed; built `build/macos/Build/Products/Release/painter.app` (42.5 MB). Xcode logged that the `Any Mac` placeholder device has no OS version; the build succeeded.
 - No app window was launched or visually verified for this enhancement, per [testing.md](testing.md).
+- The workspace-selector layout and floating-window interaction from this enhancement were later superseded by [ADR 0010](decisions/0010-pane-system.md); labeled actions, F1 help, and touch sizing remain.
 
 ## Brush Node-Graph Routes Research (out-of-roadmap, advisory)
 
@@ -121,4 +123,11 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 - `flutter analyze` — passed: `No issues found!`.
 - `flutter test` — passed all 91 tests. The rollover regression compares one trail pixel before chunk commit, while its tile is stale, and after the replacement image lands; it confirmed the trail remains unchanged at all three stages. The regression was observed failing before the continuity overlay fix.
 - Not verified: drawing in the running macOS window, physical stylus behavior, or hardware latency; verification used synthetic Flutter input and offscreen rendering.
+
+## Docked Pane System Verification (out-of-roadmap UI enhancement)
+
+- Direct request: Blender-like panes with selectable Canvas/Diagnostics content, horizontal splitting, draggable resizing, close controls, and F3 toggling. Implemented on branch `feature/pane-system`; [ADR 0010](decisions/0010-pane-system.md) records the layout and its constraints. Roadmap task T-005 remains unchanged.
+- `flutter analyze` — passed: `No issues found!`.
+- `flutter test` — passed all 86 tests. Coverage includes the initial single Canvas with no Diagnostics pane, selector behavior, split/resize/close, F3 docking, real diagnostics, and drawing while Diagnostics is open.
+- Not verified: appearance in a running macOS window; no GUI window was opened, per [testing.md](testing.md).
 

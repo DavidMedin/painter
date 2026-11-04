@@ -1,36 +1,22 @@
-// What: Widget tests that run the real PainterApp with the debug pane open and
-//   check that the pane's readouts, controls, overlay switches and report
-//   track the real tile cache, canvas controller and CanvasDebugOptions; plus
-//   two plain unit tests on CanvasDebugOptions and the tile-draw colors.
+// What: Widget tests run the real PainterApp with docked diagnostics and check
+//   that pane readouts, controls, overlay switches and reports track the real
+//   tile cache, canvas controller and CanvasDebugOptions; plus two plain unit
+//   tests on CanvasDebugOptions and the tile-draw colors.
 // Why: The pane (ADR 0006) is the only way to observe the asynchronous tile
-//   cache (ADR 0005) in a running app, so a readout that lies or a control
-//   that does nothing defeats its purpose. docs/status.md ("Debug Pane
-//   Verification") says these tests also caught bugs; the one found here
-//   (Pause not freezing every readout) is marked on its test below.
-// Covers: lib/debug/canvas_debug_pane.dart (CanvasDebugPane and its private
-//   snapshot, report text), lib/debug/canvas_debug_options.dart,
-//   lib/debug/tile_overlay.dart (tileDrawColor), and the wiring in
-//   lib/main.dart (workspace selector, F3, CanvasView.onRenderer/debugOptions).
+//   cache in the app. A readout that lies or a control that does nothing defeats
+//   its purpose. Tests also cover pause freezing every readout.
+// Covers: lib/debug/canvas_debug_pane.dart, lib/debug/canvas_debug_options.dart,
+//   lib/debug/tile_overlay.dart, and lib/main.dart pane/F3 wiring.
 //
-// Overview: how the pane is tested
-// --------------------------------
-// The pane is pure presentation: it reads a TiledRenderer and a
-// CanvasController, edits CanvasDebugOptions plus two TileCache limits
-// (maxInFlight, maxTiles), and refreshes on a 250 ms timer from one frozen
-// snapshot per refresh (ADR 0006, "Frozen snapshot"). Because it only has
-// meaning next to a live cache, these tests are widget-driven end to end:
-// PainterApp is pumped, the pane is opened through the workspace selector or
-// F3, strokes are drawn with synthetic mouse events, and the assertions compare
-// the TileCache / CanvasController / CanvasDebugOptions objects it reads.
-// The tile builds run on real asynchronous work, so helpers wait in real time
-// (see _letTilesLand). Layout uses the Ahem test font.
+// Overview: the pane is pure presentation over live renderer/controller state.
+// The tests pump PainterApp, open diagnostics with F3, draw synthetic strokes,
+// and compare visible values with TileCache, CanvasController and options.
+// Tile builds require real asynchronous time (see _letTilesLand). Layout uses
+// the Ahem test font.
 //
-// Not verified here (per docs/status.md and ADR 0006): how the pane or the
-// overlays look in a running macOS window or in the Menlo font, the overhead
-// of the always-on counters, and behavior with a very large document or
-// extreme zoom. The overlay painting (paintTileOverlay) is not pixel-checked
-// in this file; only the switches the canvas reads are. The pane's window
-// mechanics (drag, clamp, collapse) are tested in imgui_test.dart.
+// Not verified here: macOS window appearance, Menlo font rendering, counters'
+// overhead, and behavior with very large documents or extreme zoom. Overlay
+// painting is not pixel-checked; only the switches the canvas reads are.
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -65,15 +51,12 @@ String _row(WidgetTester tester, String label) {
   return value.value;
 }
 
-/// Draws one short mouse stroke (40 x 10 units) in the canvas area to the
-/// right of the pane, so the press cannot land on the pane window, which is
-/// anchored at the top-left and is 340 wide (CanvasDebugPane). Uses synthetic
+/// Draws one short mouse stroke well inside the Canvas pane with synthetic
 /// mouse events through the binding, like the canvas tests.
 Future<void> _drawStroke(WidgetTester tester) async {
   final canvas = find.byType(CanvasView);
-  // Right of the pane (which starts at the left edge and is 340 wide).
   final rect = tester.getRect(canvas);
-  final start = Offset(rect.right - 200, rect.center.dy);
+  final start = Offset(rect.left + rect.width * 0.65, rect.center.dy);
   final mouse = TestPointer(1, PointerDeviceKind.mouse);
   await tester.sendEventToBinding(
     mouse.down(start, buttons: kPrimaryMouseButton),
@@ -113,46 +96,40 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
-  // ADR 0006: "Hidden by default". The app must still open straight to the
-  // blank canvas (docs/project-brief.md).
-  testWidgets('the pane is hidden at launch (blank canvas only)', (
-    tester,
-  ) async {
+  // The app starts with one Canvas. The pane selector can change that pane to
+  // Diagnostics, and F3 converts it back or adds/removes a docked neighbor.
+  testWidgets('pane selector and F3 toggle docked diagnostics', (tester) async {
     await tester.pumpWidget(const PainterApp());
+
+    await tester.tap(find.text('Canvas').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Diagnostics').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Add a Canvas pane to inspect diagnostics.'),
+      findsOneWidget,
+    );
+    expect(find.byType(CanvasView), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
+    await tester.pump();
     expect(_pane, findsNothing);
     expect(find.byType(CanvasView), findsOneWidget);
-  });
-
-  testWidgets('workspace selector and F3 switch diagnostics content', (
-    tester,
-  ) async {
-    await tester.pumpWidget(const PainterApp());
-
-    await tester.tap(find.text('Canvas'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Diagnostics'));
-    await tester.pumpAndSettle();
-    expect(_pane, findsOneWidget);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
-    expect(_pane, findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.f3);
     await tester.pump();
     expect(_pane, findsOneWidget);
+    expect(find.byType(CanvasView), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Hide the diagnostics window'));
+    await tester.tap(find.text('Close').last);
     await tester.pump();
     expect(_pane, findsNothing);
   });
 
   testWidgets('touch setting enlarges diagnostics controls', (tester) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.tap(find.text('Canvas'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Diagnostics'));
-    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
+    await tester.pump();
 
     final checkbox = find.byType(ImCheckbox).first;
     await tester.ensureVisible(checkbox);
@@ -163,11 +140,9 @@ void main() {
     await tester.pump();
     expect(tester.getSize(checkbox).height, 56);
   });
-  // ADR 0006 states canvas input outside the pane is unaffected and tests it
-  // here; the second half checks the opposite: pressing the pane's own title
-  // bar drags the window and must not add a stroke.
+
   testWidgets(
-    'drawing still works with the pane open and clicks on it do not draw',
+    'drawing still works with docked diagnostics and split controls',
     (tester) async {
       await tester.pumpWidget(const PainterApp());
       await tester.sendKeyEvent(LogicalKeyboardKey.f3);
@@ -179,17 +154,9 @@ void main() {
       await _drawStroke(tester);
       expect(controller.document.strokeCount, 1);
 
-      // A press-drag on the pane's own title must move the window, not paint.
-      final mouse = TestPointer(2, PointerDeviceKind.mouse);
-      final title = tester.getCenter(find.text('Painter debug  [F3]'));
-      await tester.sendEventToBinding(
-        mouse.down(title, buttons: kPrimaryMouseButton),
-      );
-      await tester.sendEventToBinding(
-        mouse.move(title + const Offset(30, 30), buttons: kPrimaryMouseButton),
-      );
-      await tester.sendEventToBinding(mouse.up());
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.text('Split').first);
+      await tester.pumpAndSettle();
+      expect(_pane, findsNWidgets(2));
       expect(controller.document.strokeCount, 1);
     },
   );

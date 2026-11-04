@@ -10,7 +10,7 @@ The tile cache of ADR 0005 is asynchronous and keeps most of its state private (
 
 ## Decision
 
-- **Dense, flat, monospace "immediate-mode look".** `lib/debug/imgui.dart` is a small widget kit modeled on Dear ImGui, written with ordinary Flutter widgets. It has a draggable, collapsible window; tree-style collapsible sections; label/value rows; checkbox, button, integer slider; line plot; stacked bar; legend. It is **not** an immediate-mode engine and takes no dependency: widgets are retained and rebuild normally. It knows nothing about the painter.
+- **Dense, flat, monospace "immediate-mode look".** `lib/debug/imgui.dart` is a small widget kit modeled on Dear ImGui, written with ordinary Flutter widgets. It has tree-style collapsible sections; label/value rows; checkbox, button, integer slider; line plot; stacked bar; legend. It is **not** an immediate-mode engine and takes no dependency: widgets are retained and rebuild normally. It knows nothing about the painter.
 - **Data flows one way.** The core records facts and the pane only reads them:
   - `TileCache.counters` (`TileCacheCounters`): requests, builds split into full/incremental/skipped, evictions, queue drops, splats generated and rastered, and a bounded history of build milliseconds.
   - `TiledRenderer.frame` (`TileFrameStats`): per frame, how every visible tile was drawn (`TileDraw`: current, stale, coarser fallback, finer fallback, missing, blank) and the draw-recording time, plus a bounded history of it.
@@ -18,13 +18,13 @@ The tile cache of ADR 0005 is asynchronous and keeps most of its state private (
   - `CanvasController.resetViewport()`.
 - **Overlays draw in the canvas.** `CanvasDebugOptions` (a `ChangeNotifier`) holds overlay switches. `CanvasView` takes optional `debugOptions` and `onRenderer`; with options set it calls `paintTileOverlay` inside the document transform, so tints, grid, tile coordinates, and the visible rectangle follow pan, zoom, and rotation.
 - **Frozen snapshot.** The pane reads one `_Reading` copy per refresh (250 ms timer, not per canvas frame) so the readouts, the Pause control, and the copied text report cannot disagree.
-- **Hidden by default.** The app opens to the blank canvas as before. An AppBar bug icon and `F3` toggle the pane.
+- **Hidden by default.** The app opens to the blank Canvas. F3 toggles a docked Diagnostics pane; see [ADR 0010](0010-pane-system.md) for pane layout and renderer ownership.
 
 ## Consequences
 
-- Cost when closed: counters and per-frame classification still run (a few integer increments and one map entry per visible tile per frame). When open: one snapshot every 250 ms.
+- Cost while no Diagnostics pane is visible: counters and per-frame classification still run (a few integer increments and one map entry per visible tile per frame). While visible: one snapshot every 250 ms.
 - `maxInFlight` and `maxTiles` changes take effect immediately; lowering `maxTiles` evicts on the next completed build, not instantly.
-- A window floats inside the canvas area (it measures its container), is clamped so its title bar and close button stay on screen, and double-click on the title collapses it. The double-tap recognizer is attached to the title text only, because on the whole bar it delayed single taps on the arrow and close button by about 300 ms.
-- The pane overlaps and hides part of the canvas while open; canvas input outside the pane is unaffected (tested).
-- Measured only in the test binding: the overhead of the counters was not benchmarked, and the pane's numbers are UI-thread recording times, not raster or GPU time.
+- Diagnostics occupies a pane beside the Canvas rather than overlapping it. Canvas input remains available in its own pane.
+- The pane's numbers are UI-thread recording times, not raster or GPU time; counter overhead has not been benchmarked.
 - Not verified: appearance in the running macOS window (no windowed run was permitted by [testing.md](../testing.md)), the Menlo font (test renders use Ahem), and behavior with a very large document or extreme zoom.
+- [ADR 0010](0010-pane-system.md) supersedes this ADR's former floating-window placement; this ADR remains authoritative for diagnostics data, controls, overlays, and refresh behavior.

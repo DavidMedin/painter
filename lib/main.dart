@@ -1,8 +1,8 @@
 // What: The app shell. `main` starts [PainterApp], which owns the one
 // CanvasController (the open document and viewport), builds the MaterialApp
-// and AppBar with the workspace selector, Open / Save, and touch-size toggle,
-// wires file operations (_openDocument / _saveDocument), displays contextual
-// help, and hosts the tile-cache diagnostics pane.
+// and AppBar with Open / Save and touch-size controls, wires file operations
+// (_openDocument / _saveDocument), displays contextual help, and hosts the
+// selectable pane system with canvas and tile-cache diagnostics content.
 //
 // Why: Something has to own the state that crosses subsystems: the canvas
 // (canvas/), the file I/O abstraction (document/), and the debug pane
@@ -22,8 +22,8 @@
 //
 // What it is: the top-level widget tree and the small amount of mutable
 // state that is not part of the painting model itself: the associated document
-// path, file-operation state, workspace selection, diagnostics visibility,
-// contextual-help state, and touch-target size.
+// path, file-operation state, pane renderers, contextual-help state, and
+// touch-target size.
 // Why PainterApp owns the document path and the in-flight flag: the path is
 // not part of CanvasDocument (the saved format, docs/decisions/0002-saved-
 // document-format-and-flow.md, contains strokes only), and the controller
@@ -62,13 +62,13 @@
 // FlutterError.onError or runZonedGuarded), so that part of the brief is not
 // implemented here.
 //
-// Debug pane (docs/decisions/0006-debug-pane.md): hidden by default. The
-// workspace selector and F3 both switch between the canvas and the existing
-// diagnostics pane. The pane needs the TiledRenderer that CanvasView creates
-// internally; CanvasView reports it through its onRenderer callback (from its
-// initState), which stores it in _renderer, and the pane is only built once
-// _renderer is non-null. _debugOptions is shared with CanvasView (which paints
-// the overlays) and CanvasDebugPane (which edits the switches).
+// Pane system (docs/decisions/0010-pane-system.md): PaneSystem owns the pane
+// layout, type selector, splits, closes, and widths. This shell builds a
+// CanvasView for each Canvas pane and keeps its TiledRenderer by pane id; a
+// Diagnostics pane reads the first Canvas pane's renderer. F3 toggles a
+// Diagnostics pane beside a Canvas pane. _debugOptions is shared with every
+// CanvasView (which paints the overlays) and each CanvasDebugPane (which edits
+// the switches).
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -84,6 +84,7 @@ import 'debug/canvas_debug_pane.dart';
 import 'document/document_file_service.dart';
 import 'help/contextual_help.dart';
 import 'ui/painter_action_button.dart';
+import 'ui/pane_system.dart';
 import 'ui/touch_target_settings.dart';
 
 void main() {
@@ -115,19 +116,49 @@ class _PainterAppState extends State<PainterApp> {
 
   final CanvasDebugOptions _debugOptions = CanvasDebugOptions();
   final HelpState _helpState = HelpState();
-  TiledRenderer? _renderer;
-  WorkspaceMode _workspace = WorkspaceMode.canvas;
+  final Map<int, TiledRenderer> _renderers = {};
+  final GlobalKey<PaneSystemState> _paneSystemKey =
+      GlobalKey<PaneSystemState>();
   bool _enlargeTargets = false;
 
-  bool get _showDebugPane => _workspace == WorkspaceMode.canvasDiagnostics;
+  void _toggleDebugPane() => _paneSystemKey.currentState?.toggleDiagnostics();
 
-  void _toggleDebugPane() => _selectWorkspace(
-    _showDebugPane ? WorkspaceMode.canvas : WorkspaceMode.canvasDiagnostics,
-  );
+  void _onPaneRemoved(int paneId) => _renderers.remove(paneId);
 
-  void _selectWorkspace(WorkspaceMode mode) => setState(() {
-    _workspace = mode;
-  });
+  void _onPaneTypeChanged(int paneId, PaneKind kind) {
+    if (kind != PaneKind.canvas) _renderers.remove(paneId);
+  }
+
+  /// Builds a pane from its selected kind and the renderer owned by its Canvas.
+  Widget _buildPaneContent(BuildContext context, PaneDescriptor pane) {
+    return switch (pane.kind) {
+      PaneKind.canvas => CanvasView(
+        key: ValueKey('canvas-${pane.id}'),
+        controller: _controller,
+        debugOptions: _debugOptions,
+        onRenderer: (renderer) => _renderers[pane.id] = renderer,
+      ),
+      PaneKind.diagnostics => _diagnosticsContent(pane),
+    };
+  }
+
+  /// Builds diagnostics against the first Canvas pane, or explains the missing
+  /// prerequisite when the user has changed every pane to another type.
+  Widget _diagnosticsContent(PaneDescriptor pane) {
+    final canvasPaneId = pane.canvasPaneId;
+    final renderer = canvasPaneId == null ? null : _renderers[canvasPaneId];
+    if (renderer == null) {
+      return const Center(
+        child: Text('Add a Canvas pane to inspect diagnostics.'),
+      );
+    }
+    return CanvasDebugPane(
+      key: ValueKey('diagnostics-${pane.id}'),
+      renderer: renderer,
+      controller: _controller,
+      options: _debugOptions,
+    );
+  }
 
   Future<void> _showContextHelp() async {
     final context = _navigatorKey.currentState?.overlay?.context;
@@ -253,10 +284,8 @@ class _PainterAppState extends State<PainterApp> {
     );
   }
 
-  /// Builds the app shell and optional diagnostics workspace. The selector
-  /// changes only between implemented arrangements; F3 is equivalent to
-  /// selecting Diagnostics. Help, touch sizing, and shortcuts wrap Navigator
-  /// so modal routes inherit them; F1 uses the Navigator overlay context.
+  /// Builds the app shell and pane workspace. Help, touch sizing, and shortcuts
+  /// wrap Navigator so modal routes inherit them; F1 uses its overlay context.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -278,58 +307,7 @@ class _PainterAppState extends State<PainterApp> {
       home: Builder(
         builder: (context) => Scaffold(
           appBar: AppBar(
-            title: HelpTarget(
-              topic: HelpTopics.workspace,
-              child: SizedBox(
-                height: TouchTargetSettings.height(context),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<WorkspaceMode>(
-                    value: _workspace,
-                    items: [
-                      for (final mode in WorkspaceMode.values)
-                        DropdownMenuItem(
-                          value: mode,
-                          child: SizedBox(
-                            height: TouchTargetSettings.height(context),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  mode == WorkspaceMode.canvas
-                                      ? Icons.brush_outlined
-                                      : Icons.analytics_outlined,
-                                  size: 18,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(mode.label),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
-                    selectedItemBuilder: (context) => [
-                      for (final mode in WorkspaceMode.values)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              mode == WorkspaceMode.canvas
-                                  ? Icons.brush_outlined
-                                  : Icons.analytics_outlined,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(mode.label),
-                          ],
-                        ),
-                    ],
-                    onChanged: (mode) {
-                      if (mode != null) _selectWorkspace(mode);
-                    },
-                  ),
-                ),
-              ),
-            ),
+            title: const Text('Painter'),
             actions: [
               PainterActionButton(
                 icon: Icons.folder_open,
@@ -356,21 +334,11 @@ class _PainterAppState extends State<PainterApp> {
               ),
             ],
           ),
-          body: Stack(
-            children: [
-              CanvasView(
-                controller: _controller,
-                debugOptions: _debugOptions,
-                onRenderer: (renderer) => _renderer = renderer,
-              ),
-              if (_showDebugPane && _renderer != null)
-                CanvasDebugPane(
-                  renderer: _renderer!,
-                  controller: _controller,
-                  options: _debugOptions,
-                  onClose: _toggleDebugPane,
-                ),
-            ],
+          body: PaneSystem(
+            key: _paneSystemKey,
+            contentBuilder: _buildPaneContent,
+            onPaneRemoved: _onPaneRemoved,
+            onPaneTypeChanged: _onPaneTypeChanged,
           ),
         ),
       ),
