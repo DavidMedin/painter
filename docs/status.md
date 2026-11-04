@@ -126,8 +126,18 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 
 ## Docked Pane System Verification (out-of-roadmap UI enhancement)
 
-- Direct request: Blender-like panes with selectable Canvas/Diagnostics content, horizontal splitting, draggable resizing, close controls, and F3 toggling. Implemented on branch `feature/pane-system`; [ADR 0010](decisions/0010-pane-system.md) records the layout and its constraints. Roadmap task T-005 remains unchanged.
+- Direct request: redesign the horizontal workspace with rounded pane frames,
+  resize handles, boundary context menus, per-pane Pane Mode selectors, a
+  zero-pane empty state, and working Diagnostics content. See [ADR 0010](decisions/0010-pane-system.md); roadmap task T-005 remains unchanged.
+- `dart format` — completed for the seven changed Dart files.
+- `flutter test` — passed all 89 tests. Pane regressions cover selector and
+  border contrast, boundary insertion/deletion, resize, deleting to zero and
+  reopening Canvas, Diagnostics without a visible Canvas, renderer retention,
+  and drawing with added panes.
 - `flutter analyze` — passed: `No issues found!`.
-- `flutter test` — passed all 87 tests on the stacked tree. Coverage includes the initial single Canvas with no Diagnostics pane, selector behavior, split/resize/close, F3 docking, real diagnostics, and drawing while Diagnostics is open.
-- Not verified: appearance in a running macOS window; no GUI window was opened, per [testing.md](testing.md).
+- A temporary headless smoke run mounted the real `PainterApp`, switched
+  Diagnostics ↔ Canvas while retaining the renderer, deleted the last pane,
+  and reopened Canvas; it passed and the temporary test was removed.
+- No macOS GUI window was opened, as required by [testing.md](testing.md);
+  native visual appearance remains unverified.
 

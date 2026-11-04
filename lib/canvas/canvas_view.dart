@@ -74,16 +74,15 @@ import 'tiled_renderer.dart';
 /// The painting surface: draws the controller's document and handles pointer
 /// input as described in the overview above.
 ///
-/// The state object owns one `TiledRenderer` (sprite, tile cache and
-/// active-stroke stream) and disposes it with the view. [onRenderer] hands
-/// that renderer to tools such as the debug pane (`_PainterAppState` in
-/// main.dart).
+/// The view creates and disposes a `TiledRenderer` when none is supplied. An
+/// injected renderer is owned and disposed by the caller so pane mode changes
+/// do not discard the renderer's diagnostics state.
 class CanvasView extends StatefulWidget {
   const CanvasView({
     super.key,
     required this.controller,
     this.debugOptions,
-    this.onRenderer,
+    this.renderer,
   });
 
   final CanvasController controller;
@@ -91,9 +90,8 @@ class CanvasView extends StatefulWidget {
   /// When set, the canvas draws the overlays these options enable.
   final CanvasDebugOptions? debugOptions;
 
-  /// Called once with the renderer this view owns, so tools can read its tile
-  /// cache and frame statistics. The renderer is disposed with the view.
-  final ValueChanged<TiledRenderer>? onRenderer;
+  /// The caller-owned renderer to use, or null to let the view create one.
+  final TiledRenderer? renderer;
 
   @override
   State<CanvasView> createState() => _CanvasViewState();
@@ -104,18 +102,13 @@ class CanvasView extends StatefulWidget {
 enum _Interaction { draw, pan, rotate }
 
 /// Input state for [CanvasView]: per-pointer interaction modes, the active
-/// trackpad gesture, and the renderer it owns.
+/// trackpad gesture, and its renderer.
 class _CanvasViewState extends State<CanvasView> {
   final Map<int, _PointerInteraction> _interactions = {};
   _TrackpadGesture? _trackpadGesture;
   final GlobalKey _surfaceKey = GlobalKey();
-  late final TiledRenderer _renderer = TiledRenderer();
-
-  @override
-  void initState() {
-    super.initState();
-    widget.onRenderer?.call(_renderer);
-  }
+  late final TiledRenderer _renderer = widget.renderer ?? TiledRenderer();
+  late final bool _ownsRenderer = widget.renderer == null;
 
   /// Size of the painting surface, read from the `Listener`'s render box via
   /// [_surfaceKey]. Needed because `CanvasController` transforms are about the
@@ -263,7 +256,7 @@ class _CanvasViewState extends State<CanvasView> {
 
   @override
   void dispose() {
-    _renderer.dispose();
+    if (_ownsRenderer) _renderer.dispose();
     super.dispose();
   }
 

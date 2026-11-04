@@ -28,16 +28,20 @@
 
 ## Docked pane system and diagnostics
 
-- **Pane layout:** `lib/ui/pane_system.dart` owns pane ids, Canvas/Diagnostics
-  selections, horizontal split weights, focus, and draggable dividers. The app
-  starts with one Canvas; each pane has a top-left content selector, Split, and
-  (when another pane remains) Close. F3 adds Diagnostics beside Canvas and
-  removes it on the next press; a sole Diagnostics pane becomes Canvas.
-  See [ADR 0010](decisions/0010-pane-system.md).
-- **Content ownership:** `PainterApp` builds a `CanvasView` and owns its
-  `TiledRenderer` for each Canvas pane. Diagnostics reads the first Canvas
-  pane's renderer and explains when none exists. `CanvasDebugPane` is scrollable
-  content inside the pane; it is not a floating window.
+- **Pane layout:** `lib/ui/pane_system.dart` owns stable pane ids, Canvas and
+  Diagnostics modes, horizontal width weights, focus, and boundary actions.
+  Each pane has a rounded outlined frame and a Pane Mode selector. Inner
+  boundaries resize adjacent panes; right-click menus insert on either side or
+  between panes and delete an adjacent pane. The workspace can be empty and
+  provides a centered Open Canvas Pane action. F3 adds Diagnostics beside the
+  focused pane, removes it on the next press, converts a sole Diagnostics pane
+  to Canvas, and does nothing while empty. See [ADR 0010](decisions/0010-pane-system.md).
+- **Content ownership:** `PainterApp` retains one `TiledRenderer` per pane id
+  across mode changes, disposes it when a pane is removed or the app shuts
+  down, and injects it into `CanvasView`. Diagnostics reads the first visible
+  Canvas pane's renderer; when no Canvas is visible, it uses its own retained
+  renderer. `CanvasDebugPane` remains scrollable pane content, not a floating
+  window.
 - **Diagnostics:** `lib/debug/imgui.dart` is a reusable, painter-agnostic widget
   kit in the style of Dear ImGui (collapsible sections, rows, checkbox, button,
   integer slider, plot, stacked bar). `lib/debug/tile_overlay.dart` paints
@@ -53,9 +57,10 @@
   articles. F1 prefers hovered help, then keyboard focus, then general help.
   `TouchTargetSettings` provides app-wide 48-logical-pixel standard and
   56-logical-pixel enlarged minimum heights.
-- **Evidence:** widget tests cover content selection, split, resize, close, F3
-  docking, live diagnostics, pause, controls, overlays, reports, and continued
-  canvas drawing. macOS window appearance is not verified.
+- **Evidence:** headless widget tests cover Pane Mode selection, boundary
+  insertion/deletion, resizing, zero-pane reopening, F3 behavior, live
+  diagnostics with or without a visible Canvas, and continued drawing. macOS
+  window appearance is not verified.
 
 ## Code Documentation
 

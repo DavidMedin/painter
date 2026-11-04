@@ -15,24 +15,29 @@ multiple independently selected panes.
 
 ## Decision
 
-- `PaneSystem` owns pane identities, content kinds, horizontal split weights,
-  focus, and dividers. It starts with one Canvas pane. Each pane has a top-left
-  content selector, a Split action that adds a neighboring pane with the other
-  implemented kind, and a Close action when another pane remains. Dragging a
-  divider changes the widths of only its adjacent panes.
+- `PaneSystem` owns pane identities, content modes, horizontal split weights,
+  focus, and boundary interactions. It starts with one Canvas pane. Every pane
+  has a rounded outlined frame and a visible Pane Mode selector. Dragging an
+  inner boundary changes only the widths of its adjacent panes.
+- Right-clicking a boundary offers insertion on its outer side or between
+  panes, plus deletion of either adjacent pane. The workspace may contain zero
+  panes; its centered Open Canvas Pane action inserts a new Canvas pane.
 - Diagnostics is ordinary content inside its pane, not a floating window. F3
-  adds Diagnostics beside a Canvas pane and removes it on the next press; if the
-  sole pane is Diagnostics, F3 changes it back to Canvas.
-- The app shell owns one `TiledRenderer` per Canvas pane. A Diagnostics pane
-  reads the first Canvas pane's renderer; if no Canvas exists, it explains that
-  a Canvas pane is needed.
+  adds Diagnostics beside the focused pane and removes it on the next press; if
+  the sole pane is Diagnostics, F3 changes it back to Canvas. F3 does nothing
+  when the workspace is empty.
+- The app shell retains one `TiledRenderer` per stable pane id across content
+  mode changes and disposes it when that pane is removed or the app shuts down.
+  Diagnostics reads the first visible Canvas renderer, or its own retained
+  renderer if no Canvas pane is visible.
 - Pane layout state is runtime-only. The document model and saved-document
   format are unchanged.
 
 ## Consequences
 
-- The canvas and diagnostics can be visible at the same time without
-  overlapping; users can resize or close a pane while at least one pane remains.
+- Canvas and Diagnostics can be visible at once without overlapping. Boundary
+  menus add panes beside or between existing panes and delete the adjacent
+  pane; the last pane may be removed and a new Canvas pane opened later.
 - The layout is a horizontal row of panes; nested or vertical splits and saved
   layouts are not implemented.
 - [ADR 0006](0006-debug-pane.md) remains the decision for diagnostics data,

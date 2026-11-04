@@ -43,9 +43,9 @@ class HelpTopics {
     title: 'Painter help',
     tooltip: 'Open help for the current control',
     description:
-        'Choose pane contents, split or close panes, draw and navigate the '
-        'canvas, or open and save Painter documents. Hover a control and press '
-        'F1 for its help.',
+        'Choose pane modes, resize or manage pane boundaries, draw and navigate '
+        'the canvas, or open and save Painter documents. Hover a control and '
+        'press F1 for its help.',
   );
   static const canvas = HelpTopic(
     title: 'Canvas',
@@ -70,25 +70,26 @@ class HelpTopics {
         'the associated file.',
   );
   static const paneType = HelpTopic(
-    title: 'Pane content selector',
+    title: 'Pane Mode',
     tooltip: 'Choose this pane’s content',
     description:
         'Choose Canvas for painting or Diagnostics for tile-cache readouts. '
-        'Each pane has its own selector at the top-left.',
+        'Each pane has its own Pane Mode selector in the top bar.',
   );
-  static const splitPane = HelpTopic(
-    title: 'Split pane',
-    tooltip: 'Add a neighboring pane',
+  static const paneBoundary = HelpTopic(
+    title: 'Pane boundary',
+    tooltip: 'Resize panes or open boundary actions',
     description:
-        'Split this pane to add a neighboring pane. The new pane starts with '
-        'the other implemented content type; drag the divider to resize.',
+        'Drag an inner boundary to resize its neighboring panes. Right-click '
+        'a boundary to add a Canvas pane beside it or delete the pane on one '
+        'side. Deleting every pane reveals Open Canvas Pane.',
   );
-  static const closePane = HelpTopic(
-    title: 'Close pane',
-    tooltip: 'Remove this pane',
+  static const openCanvasPane = HelpTopic(
+    title: 'Open Canvas Pane',
+    tooltip: 'Create a Canvas pane',
     description:
-        'Remove this pane and give its space to a neighbor. At least one pane '
-        'always remains.',
+        'Create a Canvas pane in the empty workspace. You can choose another '
+        'mode from its Pane Mode selector.',
   );
   static const touchTargets = HelpTopic(
     title: 'Touch target size',

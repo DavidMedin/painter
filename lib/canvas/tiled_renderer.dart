@@ -33,10 +33,11 @@ import 'tile_stats.dart';
 /// Missing tiles fall back to the closest cached resolution scaled to fit
 /// while the right one builds in the background.
 ///
-/// Created and disposed by `_CanvasViewState` (canvas_view.dart), whose
-/// `_CanvasPainter.paint` calls [paint] every frame and repaints whenever
-/// [cache] notifies. The debug pane reaches it through `CanvasView.onRenderer`
-/// and reads [frame], [recordHistory] and [cache].
+/// Created and disposed by `_CanvasViewState` when the view owns it, or by the
+/// app shell when it injects a pane-retained renderer. `_CanvasPainter.paint`
+/// calls [paint] every frame and repaints whenever [cache] notifies. The app
+/// shell passes a pane's renderer to diagnostics, which reads [frame],
+/// [recordHistory] and [cache].
 class TiledRenderer {
   TiledRenderer() : sprite = _buildSprite() {
     cache = TileCache(sprite: sprite);
