@@ -90,7 +90,7 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                   ),
                   const SizedBox(height: 8),
                   HelpTarget(
-                    topic: HelpTopics.themeMode,
+                    topic: HelpIds.themeMode,
                     child: DropdownButtonFormField<ThemeMode>(
                       key: const ValueKey('theme-mode'),
                       initialValue: settings.mode,
@@ -173,7 +173,7 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
           children: [
             Expanded(
               child: HelpTarget(
-                topic: HelpTopics.themePalette,
+                topic: HelpIds.themePalette,
                 child: DropdownButtonFormField<String>(
                   key: ValueKey('theme-select-${brightness.name}'),
                   isExpanded: true,
@@ -200,7 +200,7 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
             PainterActionButton(
               icon: Icons.palette_outlined,
               label: 'Create theme',
-              topic: HelpTopics.createTheme,
+              topic: HelpIds.createTheme,
               onPressed: () => onCreate(selected),
             ),
           ],
@@ -371,7 +371,7 @@ class _CustomThemeDialogState extends State<_CustomThemeDialog> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 HelpTarget(
-                  topic: HelpTopics.createTheme,
+                  topic: HelpIds.createTheme,
                   child: TextFormField(
                     key: const ValueKey('custom-theme-name'),
                     controller: _name,
@@ -386,7 +386,7 @@ class _CustomThemeDialogState extends State<_CustomThemeDialog> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: HelpTarget(
-                      topic: HelpTopics.themeColor,
+                      topic: HelpIds.themeColor,
                       child: TextFormField(
                         key: ValueKey('theme-color-${entry.key}'),
                         controller: _colors[entry.key],
@@ -419,14 +419,14 @@ class _CustomThemeDialogState extends State<_CustomThemeDialog> {
       ),
       actions: [
         HelpTarget(
-          topic: HelpTopics.dialogClose,
+          topic: HelpIds.dialogClose,
           child: TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
         ),
         HelpTarget(
-          topic: HelpTopics.createTheme,
+          topic: HelpIds.createTheme,
           child: FilledButton(
             key: const ValueKey('save-custom-theme'),
             onPressed: _save,

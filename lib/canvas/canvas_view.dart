@@ -277,7 +277,7 @@ class _CanvasViewState extends State<CanvasView> {
         theme.extension<PainterThemeColors>() ??
         PainterThemeColors.fromColorScheme(theme.colorScheme);
     return HelpTarget(
-      topic: HelpTopics.canvas,
+      topic: HelpIds.canvas,
       child: Semantics(
         label: 'Canvas',
         child: Listener(

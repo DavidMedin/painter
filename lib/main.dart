@@ -79,6 +79,7 @@ import 'debug/canvas_debug_options.dart';
 import 'debug/canvas_debug_pane.dart';
 import 'document/document_file_service.dart';
 import 'help/contextual_help.dart';
+import 'help/manual_pane.dart';
 import 'settings/painter_settings.dart';
 import 'settings/settings_store.dart';
 import 'settings/theme_settings_pane.dart';
@@ -119,7 +120,6 @@ class PainterApp extends StatefulWidget {
 
 class _PainterAppState extends State<PainterApp> {
   final CanvasController _controller = CanvasController();
-  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final DocumentFileService _fileService =
       widget.fileService ?? InAppDocumentFileService();
   late final PainterSettingsController _settings;
@@ -162,7 +162,7 @@ class _PainterAppState extends State<PainterApp> {
   CanvasViewportController _viewportFor(int paneId) =>
       _viewports.putIfAbsent(paneId, CanvasViewportController.new);
 
-  /// Builds pane content from its selected kind and required retained state.
+  /// Builds pane content from its selected mode and app-owned state.
   Widget _buildPaneContent(BuildContext context, PaneDescriptor pane) {
     final paneRenderer = _rendererFor(pane.id);
     return switch (pane.kind) {
@@ -175,6 +175,10 @@ class _PainterAppState extends State<PainterApp> {
       ),
       PaneKind.diagnostics => _diagnosticsContent(pane, paneRenderer),
       PaneKind.settings => ThemeSettingsPane(controller: _settings),
+      PaneKind.manual => ManualPane(
+        helpId: pane.manualHelpId,
+        onHelpIdSelected: pane.onManualHelpSelected,
+      ),
     };
   }
 
@@ -193,6 +197,11 @@ class _PainterAppState extends State<PainterApp> {
     );
   }
 
+  /// Opens the hovered or focused control's article in the docked manual.
+  void _showContextHelp() {
+    _paneSystemKey.currentState?.openManual(_helpState.activeTopic);
+  }
+
   /// Releases app-owned settings, renderer, controller, and help state.
   /// [DocumentFileService] is not disposed; it may be injected and holds no
   /// resources.
@@ -209,12 +218,6 @@ class _PainterAppState extends State<PainterApp> {
       viewport.dispose();
     }
     super.dispose();
-  }
-
-  Future<void> _showContextHelp() async {
-    final context = _navigatorKey.currentState?.overlay?.context;
-    if (context == null) return;
-    await showContextHelp(context, _helpState.activeTopic);
   }
 
   /// Runs the Open flow described in the overview at the top of this file.
@@ -298,7 +301,7 @@ class _PainterAppState extends State<PainterApp> {
           children: [
             Text('Could not $operation the document: $error'),
             HelpTarget(
-              topic: HelpTopics.dialogDetails,
+              topic: HelpIds.dialogDetails,
               child: ExpansionTile(
                 tilePadding: EdgeInsets.zero,
                 minTileHeight: TouchTargetSettings.height(context),
@@ -320,7 +323,7 @@ class _PainterAppState extends State<PainterApp> {
           PainterActionButton(
             icon: Icons.close,
             label: 'Close',
-            topic: HelpTopics.dialogClose,
+            topic: HelpIds.dialogClose,
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],
@@ -337,7 +340,6 @@ class _PainterAppState extends State<PainterApp> {
         final settings = _settings.settings;
         return MaterialApp(
           title: 'Painter',
-          navigatorKey: _navigatorKey,
           theme: settings.themeFor(Brightness.light).themeData,
           darkTheme: settings.themeFor(Brightness.dark).themeData,
           themeMode: settings.mode,
@@ -364,7 +366,7 @@ class _PainterAppState extends State<PainterApp> {
                   PainterActionButton(
                     icon: Icons.folder_open,
                     label: 'Open',
-                    topic: HelpTopics.openDocument,
+                    topic: HelpIds.openDocument,
                     onPressed: _fileOperationInProgress
                         ? null
                         : () => _openDocument(context),
@@ -372,7 +374,7 @@ class _PainterAppState extends State<PainterApp> {
                   PainterActionButton(
                     icon: Icons.save,
                     label: 'Save',
-                    topic: HelpTopics.saveDocument,
+                    topic: HelpIds.saveDocument,
                     onPressed: _fileOperationInProgress
                         ? null
                         : () => _saveDocument(context),
@@ -380,7 +382,7 @@ class _PainterAppState extends State<PainterApp> {
                   PainterActionButton(
                     icon: Icons.touch_app,
                     label: _enlargeTargets ? 'Touch: Large' : 'Touch: Standard',
-                    topic: HelpTopics.touchTargets,
+                    topic: HelpIds.touchTargets,
                     onPressed: () =>
                         setState(() => _enlargeTargets = !_enlargeTargets),
                   ),

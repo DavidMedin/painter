@@ -262,7 +262,7 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 ImButton(
                   icon: Icons.center_focus_strong,
                   label: 'Reset view',
-                  topic: HelpTopics.resetView,
+                  topic: HelpIds.resetView,
                   onPressed: () {
                     widget.viewport.resetViewport();
                     _refreshNow();
@@ -437,7 +437,7 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 ImButton(
                   icon: Icons.refresh,
                   label: 'Discard all tiles (rebuild)',
-                  topic: HelpTopics.rebuildTiles,
+                  topic: HelpIds.rebuildTiles,
                   onPressed: () {
                     cache.invalidateAll();
                     _refreshNow();
@@ -446,7 +446,7 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 ImButton(
                   icon: Icons.copy_all,
                   label: 'Copy report',
-                  topic: HelpTopics.copyReport,
+                  topic: HelpIds.copyReport,
                   onPressed: _copyReport,
                 ),
                 if (_notice != null)

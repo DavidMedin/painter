@@ -136,7 +136,7 @@ class _ImSectionState extends State<ImSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         HelpTarget(
-          topic: HelpTopics.debugSection,
+          topic: HelpIds.debugSection,
           child: Semantics(
             button: true,
             expanded: _open,
@@ -290,7 +290,7 @@ class _ImCheckboxState extends State<ImCheckbox> {
   @override
   Widget build(BuildContext context) {
     return HelpTarget(
-      topic: HelpTopics.debugCheckbox,
+      topic: HelpIds.debugCheckbox,
       child: Semantics(
         label: widget.label,
         checked: widget.value,
@@ -346,13 +346,13 @@ class ImButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.icon = Icons.play_arrow,
-    this.topic = HelpTopics.debugAction,
+    this.topic = HelpIds.debugAction,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final IconData icon;
-  final HelpTopic topic;
+  final HelpId topic;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -416,7 +416,7 @@ class _ImSliderIntState extends State<ImSliderInt> {
     final span = math.max(1, widget.max - widget.min);
     final targetHeight = TouchTargetSettings.height(context);
     return HelpTarget(
-      topic: HelpTopics.debugSlider,
+      topic: HelpIds.debugSlider,
       child: Focus(
         focusNode: _focusNode,
         onFocusChange: (focused) => setState(() => _focused = focused),

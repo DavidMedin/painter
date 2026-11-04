@@ -209,7 +209,7 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
                 PainterActionButton(
                   icon: Icons.arrow_upward,
                   label: 'Up',
-                  topic: HelpTopics.pickerUp,
+                  topic: HelpIds.pickerUp,
                   onPressed: _goUp,
                 ),
                 const SizedBox(width: 8),
@@ -230,10 +230,10 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
                       itemBuilder: (context, index) {
                         final entry = _entries[index];
                         final topic = entry.isDirectory
-                            ? HelpTopics.pickerDirectory
+                            ? HelpIds.pickerDirectory
                             : isSave
-                            ? HelpTopics.pickerSaveFile
-                            : HelpTopics.pickerFile;
+                            ? HelpIds.pickerSaveFile
+                            : HelpIds.pickerFile;
                         return ConstrainedBox(
                           constraints: BoxConstraints(
                             minHeight: TouchTargetSettings.height(context),
@@ -261,7 +261,7 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
             if (isSave) ...[
               const Divider(height: 1),
               HelpTarget(
-                topic: HelpTopics.pickerFileName,
+                topic: HelpIds.pickerFileName,
                 child: TextField(
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: 'File name'),
@@ -276,14 +276,14 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
         PainterActionButton(
           icon: Icons.cancel_outlined,
           label: 'Cancel',
-          topic: HelpTopics.pickerCancel,
+          topic: HelpIds.pickerCancel,
           onPressed: () => Navigator.of(context).pop(),
         ),
         if (isSave)
           PainterActionButton(
             icon: Icons.save,
             label: 'Save',
-            topic: HelpTopics.pickerSave,
+            topic: HelpIds.pickerSave,
             onPressed: _confirmSave,
           ),
       ],

@@ -2,25 +2,26 @@
 //   panes arranged as a resizable two-axis split tree.
 // Why: docs/project-brief.md requires modular panes with per-pane content
 //   selectors. A floating diagnostics overlay cannot provide independent
-//   content areas; ADR 0010 records the docked layout decision.
-// Coupled to: main.dart (content builder and renderer ownership),
-//   contextual_help.dart (pane controls), and touch_target_settings.dart.
+//   side-by-side and top-and-bottom content; ADR 0010 records the docked layout
+//   decision.
+// Coupled to: main.dart (content builder and per-pane state ownership),
+//   contextual_help.dart (pane control ids), manual_catalog.dart and
+//   manual_pane.dart (manual navigation), and touch_target_settings.dart.
 //
 // ---------------------------------------------------------------------------
 // Pane-system overview
 //
-// Each pane has a stable identity and one implemented content kind: Canvas,
-// Diagnostics, or Settings. Split replaces a leaf with a binary split node;
-// each split chooses side-by-side or top-and-bottom, and its divider changes
-// only that node's two child weights. Closing any leaf except the final pane
-// collapses its parent into its sibling, so nested layouts need no
-// pane-index bookkeeping. F3 creates a side-by-side Diagnostics pane beside
-// Canvas; if Diagnostics is the sole pane, F3 changes it to Canvas. The final
-// pane cannot be closed. Clicking a pane focuses it for the active border and
-// F3 target. The owner builds content from PaneDescriptor and owns one
-// renderer per pane and one viewport per Canvas pane. This widget owns pane
-// kinds, identities, focus, and split weights; layout is runtime-only, and the
-// widget never knows about documents or drawing.
+// Each pane has a stable identity and one content kind: Canvas, Diagnostics,
+// Settings, or Manual. Split replaces a leaf with a binary split node; each
+// split chooses side-by-side or top-and-bottom, and its divider changes only
+// that node's two child weights. Closing any leaf except the final pane
+// collapses its parent into its sibling. F3 creates a side-by-side Diagnostics
+// pane beside Canvas; if Diagnostics is the sole pane, F3 changes it to Canvas.
+// F1 opens the hovered or focused control's article in an existing Manual pane,
+// or inserts Manual beside the widest pane. Manual page selection, pane layout,
+// focus, and split weights are runtime-only. The owner builds content from
+// PaneDescriptor and owns pane renderers/viewports; this widget knows nothing
+// about documents or drawing.
 // ---------------------------------------------------------------------------
 
 import 'dart:math' as math;
@@ -31,11 +32,12 @@ import '../help/contextual_help.dart';
 import 'painter_action_button.dart';
 import 'touch_target_settings.dart';
 
-/// Content types currently implemented by the app's pane host.
+/// Content modes currently implemented by the app's pane host.
 enum PaneKind {
   canvas('Canvas', Icons.brush_outlined),
   diagnostics('Diagnostics', Icons.analytics_outlined),
-  settings('Settings', Icons.settings_outlined);
+  settings('Settings', Icons.settings_outlined),
+  manual('Manual', Icons.menu_book_outlined);
 
   const PaneKind(this.label, this.icon);
 
@@ -43,21 +45,26 @@ enum PaneKind {
   final IconData icon;
 }
 
-/// The identity and content selection for one pane passed to the app shell.
+/// The identity, content selection, and manual page for one app pane.
 class PaneDescriptor {
   const PaneDescriptor({
     required this.id,
     required this.kind,
     required this.canvasPaneId,
+    required this.manualHelpId,
+    required this.onManualHelpSelected,
   });
 
-  /// Stable for the lifetime of the pane, including content-type changes.
+  /// Stable for the lifetime of the pane, including content-mode changes.
   final int id;
 
   final PaneKind kind;
 
   /// The first visible Canvas pane, or null when no Canvas pane exists.
   final int? canvasPaneId;
+
+  final HelpId manualHelpId;
+  final ValueChanged<HelpId> onManualHelpSelected;
 }
 
 /// Builds app-owned content for one pane.
@@ -93,6 +100,62 @@ class PaneSystemState extends State<PaneSystem> {
     yield* _leafPanes(_layout);
   }
 
+  /// Opens [helpId] in the existing Manual pane or beside the widest pane.
+  void openManual(HelpId helpId) {
+    final panes = _panes.toList();
+    for (final pane in panes) {
+      if (pane.kind != PaneKind.manual) continue;
+      if (pane.manualHelpId == helpId && _focusedPaneId == pane.id) return;
+      setState(() {
+        pane.manualHelpId = helpId;
+        _focusedPaneId = pane.id;
+      });
+      return;
+    }
+
+    var widestPane = panes.first;
+    var widestWidth = _paneWidth(_layout, widestPane.id, 1);
+    for (final pane in panes.skip(1)) {
+      final width = _paneWidth(_layout, pane.id, 1);
+      if (width > widestWidth) {
+        widestPane = pane;
+        widestWidth = width;
+      }
+    }
+    _splitPane(
+      widestPane.id,
+      kind: PaneKind.manual,
+      manualHelpId: helpId,
+      axis: Axis.horizontal,
+    );
+  }
+
+  /// Returns a leaf's proportional width through the nested split tree.
+  double _paneWidth(_LayoutNode node, int paneId, double width) {
+    if (node is _Pane) return node.id == paneId ? width : 0;
+    final split = node as _PaneSplit;
+    final totalWeight = split.firstWeight + split.secondWeight;
+    final firstWidth = split.axis == Axis.horizontal
+        ? width * split.firstWeight / totalWeight
+        : width;
+    final secondWidth = split.axis == Axis.horizontal
+        ? width * split.secondWeight / totalWeight
+        : width;
+    return _paneWidth(split.first, paneId, firstWidth) +
+        _paneWidth(split.second, paneId, secondWidth);
+  }
+
+  /// Selects a page from the manual tree for the pane at [paneId].
+  void _selectManualHelpId(int paneId, HelpId helpId) {
+    final pane = _findPane(_layout, paneId);
+    if (pane == null ||
+        pane.kind != PaneKind.manual ||
+        pane.manualHelpId == helpId) {
+      return;
+    }
+    setState(() => pane.manualHelpId = helpId);
+  }
+
   /// Adds or removes a Diagnostics pane for the F3 shortcut.
   void toggleDiagnostics() {
     final panes = _panes.toList();
@@ -123,7 +186,12 @@ class PaneSystemState extends State<PaneSystem> {
   }
 
   /// Replaces [paneId] with a split whose children initially share its extent.
-  void _splitPane(int paneId, {PaneKind? kind, required Axis axis}) {
+  void _splitPane(
+    int paneId, {
+    PaneKind? kind,
+    HelpId manualHelpId = HelpId.general,
+    required Axis axis,
+  }) {
     final pane = _findPane(_layout, paneId);
     if (pane == null) return;
     final newPane = _Pane(
@@ -132,8 +200,11 @@ class PaneSystemState extends State<PaneSystem> {
           kind ??
           switch (pane.kind) {
             PaneKind.canvas => PaneKind.diagnostics,
-            PaneKind.diagnostics || PaneKind.settings => PaneKind.canvas,
+            PaneKind.diagnostics ||
+            PaneKind.settings ||
+            PaneKind.manual => PaneKind.canvas,
           },
+      manualHelpId: manualHelpId,
     );
     final split = _PaneSplit(axis: axis, first: pane, second: newPane);
     setState(() {
@@ -225,6 +296,8 @@ class PaneSystemState extends State<PaneSystem> {
       id: pane.id,
       kind: pane.kind,
       canvasPaneId: firstCanvas,
+      manualHelpId: pane.manualHelpId,
+      onManualHelpSelected: (helpId) => _selectManualHelpId(pane.id, helpId),
     );
     final theme = Theme.of(context);
     return Listener(
@@ -268,7 +341,7 @@ class PaneSystemState extends State<PaneSystem> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: HelpTarget(
-                  topic: HelpTopics.paneType,
+                  topic: HelpIds.paneType,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: scheme.primaryContainer,
@@ -335,7 +408,7 @@ class PaneSystemState extends State<PaneSystem> {
             const SizedBox(width: 4),
             Flexible(
               child: HelpTarget(
-                topic: HelpTopics.splitPane,
+                topic: HelpIds.paneBoundary,
                 child: PopupMenuButton<Axis>(
                   key: ValueKey('split-menu-${pane.id}'),
                   padding: EdgeInsets.zero,
@@ -388,7 +461,7 @@ class PaneSystemState extends State<PaneSystem> {
                 child: PainterActionButton(
                   icon: Icons.close,
                   label: 'Close',
-                  topic: HelpTopics.closePane,
+                  topic: HelpIds.paneBoundary,
                   onPressed: () => _closePane(pane.id),
                   minimumHeight: height,
                 ),
@@ -405,7 +478,7 @@ class PaneSystemState extends State<PaneSystem> {
   Widget _buildDivider(_PaneSplit split, double availableExtent) {
     final isSideBySide = split.axis == Axis.horizontal;
     return HelpTarget(
-      topic: HelpTopics.paneBoundary,
+      topic: HelpIds.paneBoundary,
       child: MouseRegion(
         cursor: isSideBySide
             ? SystemMouseCursors.resizeColumn
@@ -490,12 +563,17 @@ _LayoutNode? _removePane(_LayoutNode node, int paneId) {
 /// A pane or split node in the runtime-only binary layout tree.
 abstract class _LayoutNode {}
 
-/// Mutable kind attached to a stable pane id.
+/// Mutable mode and selected manual page attached to a stable pane id.
 class _Pane extends _LayoutNode {
-  _Pane({required this.id, required this.kind});
+  _Pane({
+    required this.id,
+    required this.kind,
+    this.manualHelpId = HelpId.general,
+  });
 
   final int id;
   PaneKind kind;
+  HelpId manualHelpId;
 }
 
 /// Two children arranged on one axis with independently resizable weights.

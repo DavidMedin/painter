@@ -28,7 +28,7 @@ class PainterActionButton extends StatefulWidget {
 
   final IconData icon;
   final String label;
-  final HelpTopic topic;
+  final HelpId topic;
   final VoidCallback? onPressed;
   final Color? background;
   final Color? foreground;
@@ -111,7 +111,7 @@ Widget painterActionButtonPreview() => MaterialApp(
         builder: (context) => PainterActionButton(
           icon: Icons.save,
           label: 'Save',
-          topic: HelpTopics.saveDocument,
+          topic: HelpIds.saveDocument,
           onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Preview action selected')),
           ),

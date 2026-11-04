@@ -1,15 +1,11 @@
-// What: Widget tests drive Open/Save through the real PainterApp, draw through
-//   both Canvas panes into one document, reopen it to replace content and
-//   reset both viewports, and verify that file failures preserve the document.
-// Why: T-005 requires document round-tripping and observable file-operation
-//   failures (docs/project-brief.md). ADR 0002 specifies associated-path saves;
-//   opening resets every Canvas viewport and failed operations leave the app
-//   running without replacing the current document.
-// Covers: lib/main.dart (PainterApp, _openDocument, _saveDocument,
-//   _showFileOperationError), lib/document/document_file_service.dart
-//   (DocumentFileService, subclassed here), CanvasController /
-//   CanvasDocument (lib/canvas/canvas_controller.dart) round-tripping through
-//   toJson / fromJson, and CanvasView as the drawing surface.
+// What: Widget tests drive PainterApp's Open/Save lifecycle across shared
+//   Canvas panes and verify F1 help from a file-error dialog.
+// Why: T-005 requires document round-tripping and observable failures; the
+//   docked Manual must expose the active error-control article without replacing
+//   the current document.
+// Covers: lib/main.dart (PainterApp file operations and Manual routing),
+//   lib/document/document_file_service.dart, CanvasDocument JSON round-tripping,
+//   CanvasView input, and ManualPane selection from the Details control.
 //
 // Overview: how the file workflow is tested
 // -----------------------------------------
@@ -40,6 +36,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
 import 'package:painter/document/document_file_service.dart';
+import 'package:painter/help/manual_pane.dart';
 import 'package:painter/main.dart';
 
 void main() {
@@ -190,21 +187,18 @@ void main() {
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.f1);
     await tester.pumpAndSettle();
-    expect(find.text('Error details'), findsOneWidget);
+    expect(find.byType(ManualPane), findsOneWidget);
+    expect(find.byType(AlertDialog), findsOneWidget);
     expect(
       find.textContaining('Expand the error details to inspect the operation'),
       findsOneWidget,
     );
-    final helpDialog = find.ancestor(
-      of: find.text('Error details'),
-      matching: find.byType(AlertDialog),
-    );
-    await tester.tap(
-      find.descendant(of: helpDialog, matching: find.text('Close')),
-    );
-    await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Close'));
+    final errorDialogClose = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.text('Close'),
+    );
+    await tester.tap(errorDialogClose);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Save'));
@@ -219,7 +213,12 @@ void main() {
       tester.widget<SelectableText>(find.byType(SelectableText)).data,
       contains('Exception'),
     );
-    await tester.tap(find.text('Close'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Close'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(PainterApp), findsOneWidget);
     expect(controller.document.strokes, hasLength(1));

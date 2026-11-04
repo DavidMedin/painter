@@ -1,15 +1,10 @@
 # Project Status
 
-- **Current state:** a runnable macOS Flutter app with the first painting workflow, in-house Open/Save, selectable split panes, shared-document Canvas views, and persistent theme settings.
-- **In progress:** T-005, saved-document behavior. Headless automated verification is complete; live visual confirmation of Open/Save and pane/viewport behavior in the built Release app remains outstanding.
-- **Most recent verification:** on the merged feature tree, `flutter test` passed
-  all 99 tests; `flutter analyze` reported `No issues found!`; and
-  `flutter test test/widget_test.dart` passed both headless app tests. No
-  Release build or GUI was run after stacking.
-- **Next action:** Build the merged tree, then visually exercise Open/Save,
-  pane selection, both split orientations, resizing, and independent Canvas
-  views in the Release app before marking T-005 done.
-- **Blockers:** Live visual verification remains outstanding; no GUI window was opened or foregrounded during this work. See T-005 Verification below.
+- **Current state:** macOS Flutter app with the first painting workflow, in-house Open/Save, binary split panes with shared-document Canvas views, persistent theme settings, and docked Manual help from F1.
+- **In progress:** T-005, saved-document behavior. Headless verification passes; live visual confirmation of Open/Save and pane/viewport behavior in the Release app remains outstanding.
+- **Most recent verification:** on the merged feature tree before stacking, `flutter test` passed all 101 tests; `flutter analyze` reported `No issues found!`; focused pane/document tests exited 0; and `flutter build macos --release` built a 43.3 MB app. No GUI window was opened.
+- **Next action:** with explicit permission for windowed testing, visually exercise Open/Save, pane selection, both split orientations, resizing, and independent Canvas views before marking T-005 done.
+- **Blockers:** live visual verification remains outstanding; no GUI window was opened or foregrounded during this integration. See T-005 Verification below.
 
 ## T-002 Verification
 
@@ -176,3 +171,14 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
   `flutter test test/widget_test.dart` passed both app-shell tests. The
   post-stack Release build was not run.
 - No GUI window was opened or visually inspected. Live appearance of the pane controls, viewport interactions, and fixed paper remains unverified; T-005 stays in progress.
+
+## Manual and Binary Split-Tree Integration Verification
+
+- Preserved `rl`'s nested horizontal/vertical split tree and integrated Manual
+  as a pane leaf. F1 routes the selected help article into an existing Manual
+  pane or inserts one beside the widest leaf; selecting another article updates
+  that pane. See [ADR 0013](decisions/0013-docked-manual-pane.md). The app-level
+  file-error Details route remains covered.
+- `flutter test test/ui/pane_system_test.dart test/document/document_file_workflow_test.dart` — exited 0. `flutter test` — passed all 101 tests. `flutter analyze` — passed: `No issues found!`.
+- `flutter build macos --release` — passed; built `build/macos/Build/Products/Release/painter.app` (43.3 MB). Xcode logged the `Any Mac` placeholder warning, an arm64-only suggestion, and stale-file warnings for artifacts under `/Users/medindj1/small-projects/painter/build/` outside this worktree; the build still succeeded.
+- The file-failure workflow emitted its expected `FormatException` and `PathNotFoundException` diagnostics; the full suite passed. No GUI window was opened or foregrounded. T-005 remains in progress pending live visual verification.

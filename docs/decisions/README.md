@@ -23,6 +23,7 @@ Use this directory for durable technical or product decisions that have actually
 - [ADR 0010 — Docked pane system](0010-pane-system.md)
 - [ADR 0011 — Theme settings and saved palettes](0011-theme-settings-and-saved-palettes.md)
 - [ADR 0012 — Pane viewports and fixed canvas paper](0012-pane-viewports-and-fixed-canvas-paper.md)
+- [ADR 0013 — Docked Manual pane](0013-docked-manual-pane.md)
 
 ## Record template
 
