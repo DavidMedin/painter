@@ -1,12 +1,15 @@
-// What: Widget tests for the Settings pane's theme-mode selection and custom
-//   palette creation flow.
-// Why: Theme preferences are visible app behavior; changing a selector or saving
-//   an edited palette must update the shared settings model and persistence.
+// What: Widget tests cover theme selection, custom palettes, and the app route
+//   into Settings through the Pane Mode selector.
+// Why: Both the settings pane and its integration into the pane workspace must
+//   update the visible app behavior and persistent settings model.
+// Coupled to: main.dart, settings/painter_settings.dart,
+//   settings/theme_settings_pane.dart, and ui/pane_system.dart.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/settings/painter_settings.dart';
 import 'package:painter/settings/theme_settings_pane.dart';
+import 'package:painter/main.dart';
 
 /// Builds the Settings pane under the same paired themes used by the app shell.
 Future<void> _pumpSettingsPane(
@@ -72,5 +75,18 @@ void main() {
     expect(selected.primary, 0xFF123456);
     expect(controller.settings.customThemes, contains(selected));
     expect(find.text('Settings saved'), findsOneWidget);
+  });
+
+  testWidgets('PainterApp opens the Settings pane from Pane Mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const PainterApp());
+    await tester.tap(find.byKey(const ValueKey('pane-mode-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('theme-mode')), findsOneWidget);
+    expect(find.text('Theme mode'), findsOneWidget);
   });
 }

@@ -58,12 +58,13 @@
 // implemented here.
 //
 // Pane system (docs/decisions/0010-pane-system.md): PaneSystem owns the pane
-// layout, type selector, splits, closes, and widths. This shell builds a
-// CanvasView for each Canvas pane and keeps its TiledRenderer by pane id; a
-// Diagnostics pane reads the first Canvas pane's renderer. F3 toggles a
-// Diagnostics pane beside a Canvas pane. _debugOptions is shared with every
-// CanvasView (which paints the overlays) and each CanvasDebugPane (which edits
-// the switches).
+// layout, Pane Mode selectors, boundary menus, and widths. This shell keeps a
+// TiledRenderer for every pane id, even while the pane shows Diagnostics, so
+// changing modes preserves diagnostic state. A Diagnostics pane reads the
+// first visible Canvas pane's renderer, or its own retained renderer when no
+// Canvas pane is visible. F3 toggles Diagnostics beside the focused pane.
+// _debugOptions is shared with every CanvasView (which paints the overlays) and
+// each CanvasDebugPane (which edits the switches).
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -143,36 +144,34 @@ class _PainterAppState extends State<PainterApp> {
 
   void _toggleDebugPane() => _paneSystemKey.currentState?.toggleDiagnostics();
 
-  void _onPaneRemoved(int paneId) => _renderers.remove(paneId);
-
-  void _onPaneTypeChanged(int paneId, PaneKind kind) {
-    if (kind != PaneKind.canvas) _renderers.remove(paneId);
+  void _onPaneRemoved(int paneId) {
+    _renderers.remove(paneId)?.dispose();
   }
 
-  /// Builds a pane from its selected kind and the state its content requires.
+  TiledRenderer _rendererFor(int paneId) =>
+      _renderers.putIfAbsent(paneId, TiledRenderer.new);
+
+  /// Builds pane content from its selected kind and required retained state.
   Widget _buildPaneContent(BuildContext context, PaneDescriptor pane) {
+    final paneRenderer = _rendererFor(pane.id);
     return switch (pane.kind) {
       PaneKind.canvas => CanvasView(
         key: ValueKey('canvas-${pane.id}'),
         controller: _controller,
         debugOptions: _debugOptions,
-        onRenderer: (renderer) => _renderers[pane.id] = renderer,
+        renderer: paneRenderer,
       ),
-      PaneKind.diagnostics => _diagnosticsContent(pane),
+      PaneKind.diagnostics => _diagnosticsContent(pane, paneRenderer),
       PaneKind.settings => ThemeSettingsPane(controller: _settings),
     };
   }
 
-  /// Builds diagnostics against the first Canvas pane, or explains the missing
-  /// prerequisite when the user has changed every pane to another type.
-  Widget _diagnosticsContent(PaneDescriptor pane) {
-    final canvasPaneId = pane.canvasPaneId;
-    final renderer = canvasPaneId == null ? null : _renderers[canvasPaneId];
-    if (renderer == null) {
-      return const Center(
-        child: Text('Add a Canvas pane to inspect diagnostics.'),
-      );
-    }
+  /// Builds diagnostics against the visible Canvas, or this pane's retained
+  /// renderer when no Canvas pane is visible.
+  Widget _diagnosticsContent(PaneDescriptor pane, TiledRenderer paneRenderer) {
+    final renderer = pane.canvasPaneId == null
+        ? paneRenderer
+        : _rendererFor(pane.canvasPaneId!);
     return CanvasDebugPane(
       key: ValueKey('diagnostics-${pane.id}'),
       renderer: renderer,
@@ -181,20 +180,25 @@ class _PainterAppState extends State<PainterApp> {
     );
   }
 
-  Future<void> _showContextHelp() async {
-    final context = _navigatorKey.currentState?.overlay?.context;
-    if (context == null) return;
-    await showContextHelp(context, _helpState.activeTopic);
-  }
-
-  /// Releases controllers and help state created by this app State.
+  /// Releases app-owned settings, renderer, controller, and help state.
+  /// [DocumentFileService] is not disposed; it may be injected and holds no
+  /// resources.
   @override
   void dispose() {
     _settings.dispose();
+    for (final renderer in _renderers.values) {
+      renderer.dispose();
+    }
     _debugOptions.dispose();
     _helpState.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _showContextHelp() async {
+    final context = _navigatorKey.currentState?.overlay?.context;
+    if (context == null) return;
+    await showContextHelp(context, _helpState.activeTopic);
   }
 
   /// Runs the Open flow described in the overview at the top of this file.
@@ -367,7 +371,6 @@ class _PainterAppState extends State<PainterApp> {
                 key: _paneSystemKey,
                 contentBuilder: _buildPaneContent,
                 onPaneRemoved: _onPaneRemoved,
-                onPaneTypeChanged: _onPaneTypeChanged,
               ),
             ),
           ),

@@ -126,15 +126,29 @@ An earlier attempt used native file dialogs (`file_selector`) verified through a
 
 ## Docked Pane System Verification (out-of-roadmap UI enhancement)
 
-- Direct request: Blender-like panes with selectable Canvas/Diagnostics content, horizontal splitting, draggable resizing, close controls, and F3 toggling. Implemented on branch `feature/pane-system`; [ADR 0010](decisions/0010-pane-system.md) records the layout and its constraints. Roadmap task T-005 remains unchanged.
+- Direct request: redesign the horizontal workspace with rounded pane frames,
+  resize handles, boundary context menus, per-pane Pane Mode selectors, a
+  zero-pane empty state, and working Diagnostics content. See [ADR 0010](decisions/0010-pane-system.md); roadmap task T-005 remains unchanged.
+- `dart format` — completed for the seven changed Dart files.
+- `flutter test` — passed all 89 tests. Pane regressions cover selector and
+  border contrast, boundary insertion/deletion, resize, deleting to zero and
+  reopening Canvas, Diagnostics without a visible Canvas, renderer retention,
+  and drawing with added panes.
 - `flutter analyze` — passed: `No issues found!`.
-- `flutter test` — passed all 87 tests on the stacked tree. Coverage includes the initial single Canvas with no Diagnostics pane, selector behavior, split/resize/close, F3 docking, real diagnostics, and drawing while Diagnostics is open.
-- Not verified: appearance in a running macOS window; no GUI window was opened, per [testing.md](testing.md).
+- A temporary headless smoke run mounted the real `PainterApp`, switched
+  Diagnostics ↔ Canvas while retaining the renderer, deleted the last pane,
+  and reopened Canvas; it passed and the temporary test was removed.
+- No macOS GUI window was opened, as required by [testing.md](testing.md);
+  native visual appearance remains unverified.
 
 ## T-007 Verification
 
 - Implemented System/Light/Dark mode, independent light/dark palette selection, Gruvbox Light and Gruvbox Dark defaults, editable custom palettes, and a selectable Settings pane. Appearance settings are saved together under `painter.settings.v1`; malformed or unavailable settings fall back to defaults. See [ADR 0011](decisions/0011-theme-settings-and-saved-palettes.md).
-- `flutter test` — passed all 94 tests, including custom palette serialization, malformed-record fallback, persistence restoration, Settings interactions, and distinct tile-state colors in both built-in themes.
+- `flutter test` — passed all 97 tests, covering settings persistence, custom
+  palette interactions, and pane behavior. An app-level regression selects
+  Settings through Pane Mode and verifies the theme-mode control appears.
 - `flutter analyze` — passed: `No issues found!`.
-- `flutter build macos --release` — passed; built `build/macos/Build/Products/Release/painter.app` (43.2 MB). Xcode logged the `Any Mac` placeholder OS-version warning and stale-file warnings for artifacts outside this worktree; they did not prevent the build.
+- `flutter build macos --release` — passed; built
+  `build/macos/Build/Products/Release/painter.app` (43.3 MB). Xcode logged the
+  `Any Mac` placeholder OS-version warning; the build succeeded.
 - No GUI window was opened or visually inspected for this change, per [testing.md](testing.md). This does not change T-005's separate visual-verification blocker.
