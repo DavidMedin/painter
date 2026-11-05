@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "agentic-jujutsu": {
+      "source": "ruvnet/ruflo",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/agentic-jujutsu/SKILL.md",
+      "computedHash": "7198892019217bbd5d73b6065293b181fa3af120cbab1f038748cfa92aa27083"
+    },
     "dart-add-unit-test": {
       "source": "dart-lang/skills",
       "sourceType": "github",
