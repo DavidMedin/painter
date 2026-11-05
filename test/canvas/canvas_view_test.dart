@@ -273,6 +273,98 @@ void main() {
     expect(bytes.sublist(pixel, pixel + 4), [255, 255, 255, 255]);
     image.dispose();
   });
+
+  // The painter's canvas is the shared layer canvas, not a per-pane clip:
+  // unclipped painting leaks over whatever was drawn earlier in the same
+  // layer. docs/design/panes/pane-system.md requires pane content not to
+  // overlap, so the paper must appear in the canvas pane's own content
+  // area and nowhere else: not on the neighbouring pane, not on either
+  // pane's chrome bar.
+  testWidgets('canvas paper stays inside its own pane area', (tester) async {
+    final controller = CanvasController();
+    final viewport = CanvasViewportController();
+    addTearDown(controller.dispose);
+    addTearDown(viewport.dispose);
+    const neighbor = Color(0xFF204080);
+    const chrome = Color(0xFF804020);
+    final boundaryKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RepaintBoundary(
+            key: boundaryKey,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        height: 40,
+                        child: CustomPaint(painter: _SolidPainter(chrome)),
+                      ),
+                      Expanded(
+                        child:
+                            CustomPaint(painter: _SolidPainter(neighbor)),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        height: 40,
+                        child: CustomPaint(painter: _SolidPainter(chrome)),
+                      ),
+                      Expanded(
+                        child: CanvasView(
+                          controller: controller,
+                          viewport: viewport,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final boundary =
+        boundaryKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+    final image = (await tester.runAsync(() => boundary.toImage()))!;
+    final data = (await tester.runAsync(
+      () => image.toByteData(format: ui.ImageByteFormat.rawRgba),
+    ))!;
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+    // 800x600 test window: two 400-wide panes, each with a 40px chrome bar
+    // and a 560px content area below it.
+    Color argbAt(int x, int y) {
+      final i = (y * image.width + x) * 4;
+      return Color.fromARGB(
+        bytes[i + 3],
+        bytes[i],
+        bytes[i + 1],
+        bytes[i + 2],
+      );
+    }
+
+    expect(argbAt(600, 320), CanvasView.paperColor,
+        reason: 'canvas pane shows its paper');
+    expect(argbAt(200, 320), isNot(CanvasView.paperColor),
+        reason: 'paper must not leak onto the neighbouring pane');
+    expect(argbAt(200, 20), isNot(CanvasView.paperColor),
+        reason: 'paper must not leak onto the neighbouring pane chrome');
+    expect(argbAt(600, 20), isNot(CanvasView.paperColor),
+        reason: 'paper must not leak onto the canvas pane chrome');
+    image.dispose();
+  });
 }
 
 /// Pumps a bare CanvasView inside Scaffold(body:) with a fresh controller and
@@ -290,4 +382,21 @@ Future<CanvasController> _pumpCanvas(WidgetTester tester) async {
     ),
   );
   return controller;
+}
+
+/// Fills its whole area with one opaque color so a pane region can be
+/// identified in a pixel capture (used by the pane occlusion test).
+class _SolidPainter extends CustomPainter {
+  _SolidPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_SolidPainter oldDelegate) =>
+      oldDelegate.color != color;
 }

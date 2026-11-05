@@ -330,7 +330,8 @@ class _TrackpadGesture {
   double lastRotation = 0;
 }
 
-/// Paints fixed canvas paper, cached document tiles and the active stroke.
+/// Paints fixed canvas paper, cached document tiles and the active stroke,
+/// clipped to the pane's content area.
 /// Repaints when either shared document or local viewport changes, when the
 /// tile cache finishes a tile, or when debug options change. The actual tile
 /// drawing is `TiledRenderer.paint`.
@@ -362,8 +363,13 @@ class _CanvasPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawColor(CanvasView.paperColor, BlendMode.src);
+    // The painter's canvas is the shared layer canvas, not a per-pane clip:
+    // anything drawn outside `size` would leak over panes and chrome painted
+    // earlier in the same layer (docs/design/panes/pane-system.md keeps pane
+    // content from overlapping).
     canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    canvas.drawColor(CanvasView.paperColor, BlendMode.src);
     final center = Offset(size.width / 2, size.height / 2);
     // The transform matches CanvasViewportController.toScreen: translate by
     // pan, then rotate and scale about this pane's viewport centre.
