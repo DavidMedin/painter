@@ -2,11 +2,13 @@
 //   classification (TileFrameStats / TileDraw), cumulative counters
 //   (TileCacheCounters), and TileCache's read accessors for tools
 //   (describeTiles, peek, imageTiles, queued, building, ...).
-// Why: TileCache is asynchronous and keeps most state private, so ADR 0006
+// Why: TileCache is asynchronous and keeps most state private, so
+// design/diagnostics/debug-pane.md
 //   added counters and a per-frame classification for the debug pane. They
 //   must be true: every visible tile lands in exactly one bucket and the
 //   counters agree with what the cache did (full/incremental/skipped builds,
-//   evictions, queue drops). Also pins the ADR 0005 behaviors they describe.
+//   evictions, queue drops). Also pins the design/canvas/tile-cache.md
+//   behaviors they describe.
 // Covers: lib/canvas/tile_stats.dart, and TiledRenderer.paint / TileCache
 //   (tiled_renderer.dart, tile_cache.dart), which fill them in.
 //
@@ -273,9 +275,10 @@ void main() {
     });
 
     // Lowering maxTiles does not evict at once: TileCache evicts
-    // (_evictExcess) after a completed build (ADR 0006), so the test paints
+    // (_evictExcess) after a completed build (design/diagnostics/debug-pane.md), so the test paints
     // an unrelated region to force one. Tiles in the last frame's working set
-    // are never evicted (ADR 0005), so only earlier-painted tiles go.
+    // are never evicted (design/canvas/tile-cache.md), so only earlier-painted
+    // tiles go.
     test(
       'lowering maxTiles evicts least recently used tiles and counts them',
       () async {

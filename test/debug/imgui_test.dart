@@ -1,7 +1,8 @@
 // What: Widget tests for the ImGui-style widget kit: ImSection, ImCheckbox,
 //   ImSliderInt (pointer and accessibility input), ImButton, ImPlot and
 //   ImStackedBar.
-// Why: The kit is the building block of the diagnostics pane (ADR 0006) and
+// Why: The kit is the building block of the diagnostics pane
+// (design/diagnostics/debug-pane.md) and
 //   uses ordinary retained Flutter widgets. These tests validate control
 //   transitions and numerical readouts without opening a GUI window.
 // Covers: lib/debug/imgui.dart (ImSection, ImCheckbox, ImButton, ImSliderInt,

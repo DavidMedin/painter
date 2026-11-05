@@ -4,11 +4,11 @@
 //
 // Why: Generating splats (about 13 per document unit of stroke) is CPU-bound
 // pure Dart; doing it on the UI isolate would stall frames while tiles are
-// built (ADR 0005). Keeping the isolate plumbing (ports, request ids, message
-// layout) in this one file leaves pencil_splats.dart free of any isolate code,
-// so generation stays unit-testable on its own. See the overview in
-// pencil_splats.dart for the splat system; the only consumer is `TileCache`
-// (tile_cache.dart), which owns and disposes a worker.
+// built (design/canvas/tile-cache.md). Keeping the isolate plumbing (ports,
+// request ids, message layout) in this one file leaves pencil_splats.dart free
+// of any isolate code, so generation stays unit-testable on its own. See the
+// overview in pencil_splats.dart for the splat system; the only consumer is
+// `TileCache` (tile_cache.dart), which owns and disposes a worker.
 
 import 'dart:async';
 import 'dart:isolate';
@@ -18,13 +18,11 @@ import 'dart:ui' show Offset;
 import 'canvas_controller.dart';
 import 'pencil_splats.dart';
 
-// Message protocol between `SplatWorker` (UI isolate) and `_workerMain`
-// (worker isolate):
-//   handshake: UI spawns the isolate with the reply port; the worker sends
-//              back a SendPort for commands.
+// Message protocol between `SplatWorker` (UI isolate) and `_workerMain`:
+//   handshake: worker sends a SendPort for commands.
 //   request:   [id, stroke seed, Float64List of x, y, weight per point]
-//   reply:     [id, splat count, TransferableTypedData transforms (Float32),
-//              TransferableTypedData colors (Int32)]
+//   success:   [id, 'ok', splat count, transforms, colors]
+//   failure:   [id, 'error', message, stack trace]
 // Replies are matched to requests by id through `_pending`, so they need not
 // arrive in order.
 
@@ -103,12 +101,19 @@ class SplatWorker {
       final reply = message! as List<Object?>;
       final request = _pending.remove(reply[0]! as int);
       if (request == null) return;
-      final count = reply[1]! as int;
+      if (reply[1] == 'error') {
+        request.completeError(
+          Exception('Splat worker failed: ${reply[2]}'),
+          StackTrace.fromString(reply[3]! as String),
+        );
+        return;
+      }
+      final count = reply[2]! as int;
       request.complete(
         StrokeSplats(
           count,
-          (reply[2]! as TransferableTypedData).materialize().asFloat32List(),
-          (reply[3]! as TransferableTypedData).materialize().asInt32List(),
+          (reply[3]! as TransferableTypedData).materialize().asFloat32List(),
+          (reply[4]! as TransferableTypedData).materialize().asInt32List(),
         ),
       );
     });
@@ -151,20 +156,30 @@ void _workerMain(SendPort replies) {
   replies.send(commands.sendPort);
   commands.listen((Object? message) {
     final request = message! as List<Object?>;
-    final flat = request[2]! as Float64List;
-    final points = <CanvasPoint>[
-      for (var i = 0; i < flat.length; i += 3)
-        CanvasPoint(
-          position: Offset(flat[i], flat[i + 1]),
-          weight: flat[i + 2],
-        ),
-    ];
-    final batch = PencilSplats.build(points, strokeSeed: request[1]! as int);
-    replies.send(<Object>[
-      request[0]!,
-      batch.count,
-      TransferableTypedData.fromList([batch.transforms]),
-      TransferableTypedData.fromList([batch.colors]),
-    ]);
+    try {
+      final flat = request[2]! as Float64List;
+      final points = <CanvasPoint>[
+        for (var i = 0; i < flat.length; i += 3)
+          CanvasPoint(
+            position: Offset(flat[i], flat[i + 1]),
+            weight: flat[i + 2],
+          ),
+      ];
+      final batch = PencilSplats.build(points, strokeSeed: request[1]! as int);
+      replies.send(<Object>[
+        request[0]!,
+        'ok',
+        batch.count,
+        TransferableTypedData.fromList([batch.transforms]),
+        TransferableTypedData.fromList([batch.colors]),
+      ]);
+    } catch (error, stackTrace) {
+      replies.send(<Object>[
+        request[0]!,
+        'error',
+        error.toString(),
+        stackTrace.toString(),
+      ]);
+    }
   });
 }

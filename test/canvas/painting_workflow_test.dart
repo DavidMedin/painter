@@ -1,13 +1,13 @@
 // What: One end-to-end widget test through the real PainterApp: launch to the
 //   canvas, draw a mouse stroke (weight 1.0) and a stylus stroke (pressure
 //   weights), then pan, zoom about the pointer, and rotate with the mouse.
-// Why: T-004 acceptance (docs/project-brief.md "First Painting Workflow" and
-//   its acceptance scenarios; docs/status.md "T-004 Verification"). It
+// Why: T-004 acceptance (docs/design/canvas/behavior.md, "Drawing" and
+//   "Viewport"). It
 //   combines the interactions that canvas_view_test.dart checks one by one,
 //   but through the full app shell so the AppBar and layout in lib/main.dart
 //   are present. Pointer input is synthetic (mouse and stylus events), so
 //   physical stylus hardware and raster output are not verified, as noted in
-//   docs/status.md.
+//   docs/status.md ("Not Verified").
 // Covers: lib/main.dart (PainterApp), lib/canvas/canvas_view.dart (CanvasView
 //   input handling), lib/canvas/canvas_controller.dart (CanvasController).
 
@@ -18,8 +18,8 @@ import 'package:painter/main.dart';
 
 void main() {
   // All positions are computed relative to the canvas's actual on-screen
-  // offset (topLeft), not the window origin: docs/status.md (T-005) records
-  // that an earlier version assumed the canvas started at the window origin
+  // offset (topLeft), not the window origin: docs/design/canvas/vector-canvas.md
+  // ("Regression Notes") records that an earlier version assumed the canvas started at the window origin
   // and broke once the Open/Save AppBar was added above it. The stylus
   // events are hand-built so pressure can be set; 0.2 / 0.8 map to weights
   // 0.24 / 0.81 (see CanvasView._weightFor).

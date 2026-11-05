@@ -1,7 +1,8 @@
 // What: unit tests of TileGrid's pure geometry: choosing a level of detail
 //   from zoom, tile sizes per level, which tiles cover a region, a tile's
 //   coarser ancestor, and the document-space bounds of a rotated viewport.
-// Why: ADR 0005 puts all tile geometry in tile_grid.dart as pure Dart (no
+// Why: design/canvas/tile-cache.md puts all tile geometry in tile_grid.dart as
+// pure Dart (no
 //   GPU, no async) because both the scheduler (TileCache) and the painter
 //   (TiledRenderer) depend on it. Off-by-one errors here (an edge tile
 //   double-counted or dropped, negative indices rounded toward zero, a
@@ -17,10 +18,10 @@ import 'package:painter/canvas/tile_grid.dart';
 
 void main() {
   group('level of detail', () {
-    // Level L serves pixelsPerUnit in (2^(L-0.5), 2^(L+0.5)] (ADR 0005:
-    // LOD = ceil(log2(zoom * devicePixelRatio) - 0.5)), so a tile is never
-    // magnified by more than sqrt(2). Called once per frame by
-    // TiledRenderer.paint.
+    // Level L serves pixelsPerUnit in (2^(L-0.5), 2^(L+0.5)]
+    // (design/canvas/tile-cache.md: LOD = ceil(log2(zoom * devicePixelRatio) -
+    // 0.5)), so a tile is never magnified by more than sqrt(2). Called once per
+    // frame by TiledRenderer.paint.
     test('picks the level whose resolution is closest, rounding up', () {
       expect(TileGrid.levelFor(1), 0);
       expect(TileGrid.levelFor(2), 1);
@@ -31,8 +32,8 @@ void main() {
       expect(TileGrid.levelFor(1.5), 1);
     });
 
-    // ADR 0005: levels run from -4 to 5, spanning zoom 0.1-16 at device
-    // pixel ratios up to about 4.
+    // design/canvas/tile-cache.md: levels run from -4 to 5, spanning zoom
+    // 0.1-16 at device pixel ratios up to about 4.
     test('clamps to the supported range', () {
       expect(TileGrid.levelFor(1e-9), TileGrid.minLevel);
       expect(TileGrid.levelFor(1e9), TileGrid.maxLevel);
@@ -47,7 +48,7 @@ void main() {
 
   group('tilesIn', () {
     // Tiles are anchored to document space, so indices can be negative
-    // (ADR 0005 Consequences: "negative indices are covered by tests").
+    // (design/canvas/tile-cache.md Consequences: "negative indices are covered by tests").
     // Rounding toward zero instead of flooring would mis-index x < 0.
     test('covers a region exactly, including negative coordinates', () {
       final keys = TileGrid.tilesIn(
@@ -122,8 +123,8 @@ void main() {
   });
 
   // A rotated view needs a larger document-space box than the screen size
-  // (ADR 0005: up to about 270 tiles when zoomed out and rotated). All four
-  // screen corners are mapped to document space and bounded.
+  // (design/canvas/tile-cache.md: up to about 270 tiles when zoomed out and
+  // rotated). All four screen corners are mapped to document space and bounded.
   test('visibleDocumentRect bounds a rotated viewport', () {
     const screen = Size(100, 50);
     const angle = math.pi / 4;

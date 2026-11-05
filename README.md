@@ -9,13 +9,14 @@ macOS is the current target. Linux, Windows, and Android are future targets; the
 ## Project context
 
 - [Agent instructions](AGENTS.md)
+- [EARS+ requirements skill](.agents/skills/ears-plus-requirements/SKILL.md)
+- [Spec-driven development skill](.agents/skills/painter-spec-driven-development/SKILL.md)
 - [Project brief](docs/project-brief.md)
+- [Design documents](docs/design/README.md): one folder per system, each with a behavioral document in EARS+ and design decisions
+- [Architecture overview](docs/design/architecture-overview.md)
+- [Code commenting standard](docs/design/engineering/code-commenting.md)
 - [Feature strategy report](docs/feature-strategy-report.typ)
 - [Brush node-graph routes report](docs/brush-node-graph-routes.typ)
-- [Architecture](docs/architecture.md)
 - [Current status](docs/status.md)
 - [Testing](docs/testing.md)
-- [Architecture decision records](docs/decisions/README.md)
-- [Code commenting standard](docs/decisions/0007-code-commenting-standard.md)
-- [Version control: JJ, Git, and worktrees](docs/version-control.md)
 - [Task backlog](tasks/README.md)

@@ -5,8 +5,8 @@
 //
 // Why: Open/Save use an in-house picker instead of the platform's native file
 // dialogs so the whole flow can be driven by `flutter test` with no native UI
-// and no file-picker plugin (docs/decisions/0002-saved-document-format-and-
-// flow.md). This file is only the UI half; it never reads or writes document
+// and no file-picker plugin (docs/design/document/file-format-and-flow.md).
+// This file is only the UI half; it never reads or writes document
 // contents.
 //
 // Coupled to: document_file_service.dart (InAppDocumentFileService is the
@@ -46,7 +46,7 @@ class InAppFilePicker extends StatefulWidget {
   final String suggestedName;
 
   /// The only file extension the picker lists and appends on save. Must match
-  /// the `.paint` format extension of ADR 0002.
+  /// the `.paint` format extension of design/document/file-format-and-flow.md.
   static const String extension = '.paint';
 
   /// Shows the picker in a dialog and returns the chosen path, or `null`

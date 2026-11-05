@@ -8,6 +8,7 @@
 /// Stable identifiers assigned to interactive controls and manual articles.
 enum HelpId {
   general,
+  manualNavigation,
   canvas,
   openDocument,
   saveDocument,
@@ -15,8 +16,10 @@ enum HelpId {
   themeMode,
   themePalette,
   createTheme,
+  editTheme,
   themeColor,
   paneBoundary,
+  logEntryDetails,
   touchTargets,
   pickerUp,
   pickerDirectory,
@@ -39,15 +42,17 @@ enum HelpId {
 /// Names the ids assigned by controls; article text stays in [ManualCatalog].
 abstract final class HelpIds {
   static const general = HelpId.general;
+  static const manualNavigation = HelpId.manualNavigation;
   static const canvas = HelpId.canvas;
   static const openDocument = HelpId.openDocument;
-  static const saveDocument = HelpId.saveDocument;
-  static const paneType = HelpId.paneMode;
   static const themeMode = HelpId.themeMode;
   static const themePalette = HelpId.themePalette;
+  static const saveDocument = HelpId.saveDocument;
+  static const paneType = HelpId.paneMode;
   static const createTheme = HelpId.createTheme;
-  static const themeColor = HelpId.themeColor;
   static const paneBoundary = HelpId.paneBoundary;
+  static const editTheme = HelpId.editTheme;
+  static const themeColor = HelpId.themeColor;
   static const touchTargets = HelpId.touchTargets;
   static const pickerUp = HelpId.pickerUp;
   static const pickerDirectory = HelpId.pickerDirectory;
@@ -65,6 +70,7 @@ abstract final class HelpIds {
   static const resetView = HelpId.resetView;
   static const rebuildTiles = HelpId.rebuildTiles;
   static const copyReport = HelpId.copyReport;
+  static const logEntryDetails = HelpId.logEntryDetails;
 }
 
 /// The user-facing text and navigation group for one manual page.
@@ -107,6 +113,15 @@ class ManualCatalog {
           'or Manual. Hover a control and press F1 to open its manual page. '
           'The manual navigation tree stays beside the article so you can '
           'browse related topics.',
+    ),
+    HelpId.manualNavigation: ManualArticle(
+      id: HelpId.manualNavigation,
+      title: 'Manual navigation',
+      tooltip: 'Expand or collapse this article group',
+      section: 'Getting started',
+      content:
+          'Expand a group to browse its articles. Selecting an article shows '
+          'it beside the navigation tree.',
     ),
     HelpId.canvas: ManualArticle(
       id: HelpId.canvas,
@@ -211,6 +226,15 @@ class ManualCatalog {
           'or close an adjacent pane. Close removes a pane; the final pane '
           'cannot be closed.',
     ),
+    HelpId.logEntryDetails: ManualArticle(
+      id: HelpId.logEntryDetails,
+      title: 'Log entry details',
+      tooltip: 'Expand this record to inspect its details',
+      section: 'Logging',
+      content:
+          'Expand a log record to inspect its structured arguments and stack '
+          'trace when they are available.',
+    ),
     HelpId.themeMode: ManualArticle(
       id: HelpId.themeMode,
       title: 'Theme mode',
@@ -238,6 +262,15 @@ class ManualCatalog {
       content:
           'Name a new palette, edit each UI color role, and save it for this '
           'brightness. The new theme is selected immediately.',
+    ),
+    HelpId.editTheme: ManualArticle(
+      id: HelpId.editTheme,
+      title: 'Edit theme',
+      tooltip: 'Edit the selected custom color palette',
+      section: 'Appearance',
+      content:
+          'Change the selected custom palette’s name or colors. Saving '
+          'updates that palette in place without changing its identity.',
     ),
     HelpId.themeColor: ManualArticle(
       id: HelpId.themeColor,
@@ -330,7 +363,10 @@ class ManualCatalog {
   };
 
   static const sections = <ManualSection>[
-    ManualSection(title: 'Getting started', articles: [HelpId.general]),
+    ManualSection(
+      title: 'Getting started',
+      articles: [HelpId.general, HelpId.manualNavigation],
+    ),
     ManualSection(title: 'Painting', articles: [HelpId.canvas]),
     ManualSection(
       title: 'Documents',
@@ -356,6 +392,7 @@ class ManualCatalog {
         HelpId.themeMode,
         HelpId.themePalette,
         HelpId.createTheme,
+        HelpId.editTheme,
         HelpId.themeColor,
         HelpId.touchTargets,
       ],
@@ -372,6 +409,7 @@ class ManualCatalog {
         HelpId.copyReport,
       ],
     ),
+    ManualSection(title: 'Logging', articles: [HelpId.logEntryDetails]),
     ManualSection(
       title: 'Dialogs',
       articles: [HelpId.dialogClose, HelpId.dialogDetails],

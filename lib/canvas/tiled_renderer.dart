@@ -5,8 +5,8 @@
 // Why: painting has to be fast and must never wait on rasterization, so the
 // slow work lives in tile_cache.dart and this file only reads cached content
 // and asks for what is missing. It owns the sprite, cache, and active-chunk
-// stream because those share one lifetime (docs/decisions/0005-tiled-texture-
-// cache.md; it replaced the old PencilRenderer). The system overview,
+// stream because those share one lifetime (docs/design/canvas/tile-cache.md;
+// it replaced the old PencilRenderer). The system overview,
 // including how this file and tile_cache.dart, tile_grid.dart and tile_stats.dart
 // divide the work, is in tile_cache.dart.
 
@@ -39,8 +39,15 @@ import 'tile_stats.dart';
 /// shell passes a pane's renderer to diagnostics, which reads [frame],
 /// [recordHistory] and [cache].
 class TiledRenderer {
-  TiledRenderer() : sprite = _buildSprite() {
-    cache = TileCache(sprite: sprite);
+  TiledRenderer({
+    SplatWorker? worker,
+    void Function(Object error, StackTrace stackTrace)? onSplatWorkerError,
+  }) : sprite = _buildSprite() {
+    cache = TileCache(
+      sprite: sprite,
+      worker: worker,
+      onSplatWorkerError: onSplatWorkerError,
+    );
   }
 
   /// The gaussian sprite every splat samples, shared with [cache] and the

@@ -1,7 +1,8 @@
 // What: PainterActionButton, the shared rendering for labeled, icon-bearing
 //   actions.
-// Why: docs/project-brief.md requires visible button affordance, concise hover
-//   hints, and touch-configurable sizing. One component keeps those behaviors
+// Why: docs/design/controls/behavior.md requires visible button affordance,
+//   concise hover hints, and touch-configurable sizing. One component keeps
+//   those behaviors
 //   consistent across the app shell, file picker, and developer controls.
 // Coupled to: contextual_help.dart (tooltip and help topic),
 //   touch_target_settings.dart (minimum hit-target height), and callers in

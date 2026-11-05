@@ -13,14 +13,20 @@ import 'package:flutter/widget_previews.dart';
 
 import '../help/contextual_help.dart';
 import '../ui/painter_action_button.dart';
+import '../logging/painter_log.dart';
+import '../ui/touch_target_settings.dart';
 import 'painter_settings.dart';
 
 /// The sole Settings-pane section: application theme appearance.
 class ThemeSettingsPane extends StatefulWidget {
-  const ThemeSettingsPane({super.key, required this.controller});
+  const ThemeSettingsPane({
+    super.key,
+    required this.controller,
+    required this.logger,
+  });
 
   final PainterSettingsController controller;
-
+  final PainterLog logger;
   @override
   State<ThemeSettingsPane> createState() => _ThemeSettingsPaneState();
 }
@@ -28,14 +34,19 @@ class ThemeSettingsPane extends StatefulWidget {
 class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
   String? _notice;
 
-  /// Saves an immutable settings change and leaves the selected value active if
-  /// the backing preference service reports an error.
+  /// Saves an immutable change and logs persistence failures independently
+  /// of whether this pane is still mounted.
   Future<void> _save(PainterSettings settings) async {
     setState(() => _notice = null);
     try {
       await widget.controller.update(settings);
       if (mounted) setState(() => _notice = 'Settings saved');
-    } catch (error) {
+    } catch (error, stackTrace) {
+      await widget.logger.error(
+        'settings.persistence.failed',
+        arguments: {'error': error.toString()},
+        stackTrace: stackTrace.toString(),
+      );
       if (mounted) setState(() => _notice = 'Could not save settings: $error');
     }
   }
@@ -63,6 +74,32 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
           : settings.darkThemeId,
     );
     await _save(updated);
+  }
+
+  /// Replaces the selected custom palette while preserving its stable id.
+  Future<void> _editTheme(
+    BuildContext context,
+    Brightness brightness,
+    PainterTheme base,
+  ) async {
+    if (!widget.controller.settings.customThemes.any(
+      (theme) => theme.id == base.id,
+    )) {
+      return;
+    }
+    final theme = await showDialog<PainterTheme>(
+      context: context,
+      builder: (context) =>
+          _CustomThemeDialog(brightness: brightness, base: base, editing: true),
+    );
+    if (theme == null || !mounted) return;
+    final settings = widget.controller.settings;
+    final index = settings.customThemes.indexWhere(
+      (candidate) => candidate.id == base.id,
+    );
+    if (index < 0) return;
+    final themes = [...settings.customThemes]..[index] = theme;
+    await _save(settings.copyWith(customThemes: themes));
   }
 
   @override
@@ -94,8 +131,9 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                     child: DropdownButtonFormField<ThemeMode>(
                       key: const ValueKey('theme-mode'),
                       initialValue: settings.mode,
+                      itemHeight: TouchTargetSettings.height(context),
                       decoration: const InputDecoration(labelText: 'Mode'),
-                      items: const [
+                      items: [
                         DropdownMenuItem(
                           value: ThemeMode.system,
                           child: Text('System'),
@@ -127,8 +165,9 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                         _save(settings.copyWith(lightThemeId: id)),
                     onCreate: (base) =>
                         _createTheme(context, Brightness.light, base),
+                    onEdit: (base) =>
+                        _editTheme(context, Brightness.light, base),
                   ),
-                  const SizedBox(height: 16),
                   _themeSelector(
                     context,
                     brightness: Brightness.dark,
@@ -139,6 +178,8 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                         _save(settings.copyWith(darkThemeId: id)),
                     onCreate: (base) =>
                         _createTheme(context, Brightness.dark, base),
+                    onEdit: (base) =>
+                        _editTheme(context, Brightness.dark, base),
                   ),
                   if (_notice != null) ...[
                     const SizedBox(height: 12),
@@ -153,7 +194,7 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
     );
   }
 
-  /// Shows a brightness-specific built-in/custom theme selector and creator.
+  /// Shows a brightness-specific palette selector with create/edit actions.
   Widget _themeSelector(
     BuildContext context, {
     required Brightness brightness,
@@ -162,8 +203,12 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
     required List<PainterTheme> themes,
     required ValueChanged<String> onSelected,
     required ValueChanged<PainterTheme> onCreate,
+    required ValueChanged<PainterTheme> onEdit,
   }) {
     final selected = themes.firstWhere((theme) => theme.id == selectedId);
+    final isCustom = widget.controller.settings.customThemes.any(
+      (theme) => theme.id == selected.id,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -178,6 +223,7 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                   key: ValueKey('theme-select-${brightness.name}'),
                   isExpanded: true,
                   initialValue: selectedId,
+                  itemHeight: TouchTargetSettings.height(context),
                   decoration: InputDecoration(labelText: label),
                   items: [
                     for (final theme in themes)
@@ -197,12 +243,20 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
               ),
             ),
             const SizedBox(width: 10),
-            PainterActionButton(
-              icon: Icons.palette_outlined,
-              label: 'Create theme',
-              topic: HelpIds.createTheme,
-              onPressed: () => onCreate(selected),
-            ),
+            if (isCustom)
+              PainterActionButton(
+                icon: Icons.edit_outlined,
+                label: 'Edit theme',
+                topic: HelpIds.editTheme,
+                onPressed: () => onEdit(selected),
+              )
+            else
+              PainterActionButton(
+                icon: Icons.palette_outlined,
+                label: 'Create theme',
+                topic: HelpIds.createTheme,
+                onPressed: () => onCreate(selected),
+              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -260,12 +314,17 @@ class _ThemeSwatch extends StatelessWidget {
   }
 }
 
-/// Edits every palette color role and returns a custom named theme.
+/// Creates a palette or edits a custom palette's colors.
 class _CustomThemeDialog extends StatefulWidget {
-  const _CustomThemeDialog({required this.brightness, required this.base});
+  const _CustomThemeDialog({
+    required this.brightness,
+    required this.base,
+    this.editing = false,
+  });
 
   final Brightness brightness;
   final PainterTheme base;
+  final bool editing;
 
   @override
   State<_CustomThemeDialog> createState() => _CustomThemeDialogState();
@@ -274,7 +333,7 @@ class _CustomThemeDialog extends StatefulWidget {
 class _CustomThemeDialogState extends State<_CustomThemeDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name = TextEditingController(
-    text: '${widget.base.name} Custom',
+    text: widget.editing ? widget.base.name : '${widget.base.name} Custom',
   );
   late final Map<String, TextEditingController> _colors = {
     for (final entry in _colorValues(widget.base).entries)
@@ -333,7 +392,9 @@ class _CustomThemeDialogState extends State<_CustomThemeDialog> {
             int.parse(entry.value.text.replaceFirst('#', ''), radix: 16) |
             0xFF000000,
     };
-    final id = 'custom-${DateTime.now().microsecondsSinceEpoch}';
+    final id = widget.editing
+        ? widget.base.id
+        : 'custom-${DateTime.now().microsecondsSinceEpoch}';
     Navigator.of(context).pop(
       widget.base.copyWith(
         id: id,
@@ -361,7 +422,10 @@ class _CustomThemeDialogState extends State<_CustomThemeDialog> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: Text('Create ${widget.brightness.name} theme'),
+      title: Text(
+        '${widget.editing ? 'Edit' : 'Create'} '
+        '${widget.brightness.name} theme',
+      ),
       content: SizedBox(
         width: 540,
         child: Form(
@@ -371,7 +435,9 @@ class _CustomThemeDialogState extends State<_CustomThemeDialog> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 HelpTarget(
-                  topic: HelpIds.createTheme,
+                  topic: widget.editing
+                      ? HelpIds.editTheme
+                      : HelpIds.createTheme,
                   child: TextFormField(
                     key: const ValueKey('custom-theme-name'),
                     controller: _name,
@@ -418,20 +484,20 @@ class _CustomThemeDialogState extends State<_CustomThemeDialog> {
         ),
       ),
       actions: [
-        HelpTarget(
+        PainterActionButton(
+          icon: Icons.close,
+          label: 'Cancel',
           topic: HelpIds.dialogClose,
-          child: TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
+          onPressed: () => Navigator.of(context).pop(),
+          background: colors.surfaceContainerHighest,
+          foreground: colors.onSurface,
         ),
-        HelpTarget(
-          topic: HelpIds.createTheme,
-          child: FilledButton(
-            key: const ValueKey('save-custom-theme'),
-            onPressed: _save,
-            child: const Text('Save theme'),
-          ),
+        PainterActionButton(
+          key: const ValueKey('save-theme'),
+          icon: Icons.save_outlined,
+          label: widget.editing ? 'Save changes' : 'Save theme',
+          topic: widget.editing ? HelpIds.editTheme : HelpIds.createTheme,
+          onPressed: _save,
         ),
       ],
     );
@@ -461,7 +527,10 @@ Widget themeSettingsPanePreview() {
     theme: settings.themeFor(Brightness.light).themeData,
     darkTheme: settings.themeFor(Brightness.dark).themeData,
     home: Scaffold(
-      body: ThemeSettingsPane(controller: PainterSettingsController()),
+      body: ThemeSettingsPane(
+        controller: PainterSettingsController(),
+        logger: PainterLog.memory(),
+      ),
     ),
   );
 }

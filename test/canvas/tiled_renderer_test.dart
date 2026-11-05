@@ -1,12 +1,13 @@
 // What: end-to-end pixel checks of the tiled pencil renderer: strokes are
 //   painted through TiledRenderer (and its TileCache) into an offscreen image
 //   and the resulting pixels are measured.
-// Why: the tile cache replaced per-frame replay of every stroke (ADR 0005).
-//   These tests keep ADR 0004's pencil look (grainy specks, pressure, stable
-//   grain) and pin the cache's behavior: incremental tile updates, stale or
-//   scaled tiles shown until replacements land, no eviction of on-screen
-//   tiles. docs/status.md ("Tiled Texture Cache Verification") lists bugs
-//   found by these scenarios.
+// Why: the tile cache replaced per-frame replay of every stroke
+// (design/canvas/tile-cache.md).
+//   These tests keep design/canvas/pencil-splats.md's pencil look (grainy
+//   specks, pressure, stable grain) and pin the cache's behavior: incremental
+//   tile updates, stale or scaled tiles shown until replacements land, no
+//   eviction of on-screen tiles. docs/design/canvas/tile-cache.md ("Regression
+//   Notes") lists bugs found by these scenarios.
 // Covers: lib/canvas/ tiled_renderer.dart (TiledRenderer.paint),
 //   tile_cache.dart (TileCache), tile_grid.dart, pencil_splats.dart,
 //   and via the cache splat_worker.dart (SplatWorker).
@@ -31,8 +32,8 @@
 // tiles land asynchronously, tests use real timers: _settled() repaints,
 // yielding to the event loop, until TileCache.idle.
 //
-// Deliberately NOT verified here (see ADR 0005 and docs/status.md "Not
-// verified"): the running macOS window (docs/testing.md forbids windowed runs
+// Deliberately NOT verified here (see docs/design/canvas/tile-cache.md
+// Consequences and docs/status.md "Not Verified"): the running macOS window (docs/testing.md forbids windowed runs
 // without permission, so everything is headless), raster-thread/GPU time and
 // texture memory on real hardware, how the scaled-fallback transition looks
 // to an artist, accumulated blur from repeated incremental updates at
@@ -40,6 +41,7 @@
 // tile schedules a repaint of the real CanvasView is also not covered here;
 // the notifyListeners path was only checked by a throwaway widget test.
 
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -47,9 +49,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_controller.dart';
 import 'package:painter/canvas/pencil_splats.dart';
+import 'package:painter/canvas/splat_worker.dart';
 import 'package:painter/canvas/tile_cache.dart';
 import 'package:painter/canvas/tile_grid.dart';
 import 'package:painter/canvas/tiled_renderer.dart';
+import 'package:painter/logging/painter_log.dart';
 
 /// Size in pixels of every offscreen frame the helpers below render. Small
 /// enough to scan every pixel; wide enough to hold a 160-unit stroke.
@@ -78,6 +82,12 @@ CanvasDocument _documentOf(List<List<CanvasPoint>> strokes) {
 List<CanvasPoint> _horizontal(double weight, {double y = 20}) => [
   CanvasPoint(position: Offset(20, y), weight: weight),
   CanvasPoint(position: Offset(180, y), weight: weight),
+];
+
+/// A short horizontal stroke that remains one document chunk.
+List<CanvasPoint> _shortHorizontal(double weight, {double y = 20}) => [
+  CanvasPoint(position: Offset(20, y), weight: weight),
+  CanvasPoint(position: Offset(50, y), weight: weight),
 ];
 
 /// Paints one frame of [document] (plus the live [active] stroke) through
@@ -134,13 +144,91 @@ Future<ByteData> _settled(
   fail('tile cache never went idle');
 }
 
-/// A fresh [TiledRenderer] (own sprite and TileCache) disposed at teardown.
-/// Each test gets its own so no cached tiles leak between tests.
-TiledRenderer _renderer() {
-  final renderer = TiledRenderer();
+/// A fresh [TiledRenderer] disposed at teardown.
+TiledRenderer _renderer({
+  SplatWorker? worker,
+  void Function(Object error, StackTrace stackTrace)? onSplatWorkerError,
+}) {
+  final renderer = TiledRenderer(
+    worker: worker,
+    onSplatWorkerError: onSplatWorkerError,
+  );
   addTearDown(renderer.dispose);
   return renderer;
 }
+
+/// Holds requests so tests can finish worker computations in a chosen order.
+class _ControlledSplatWorker extends SplatWorker {
+  final requests = <Completer<StrokeSplats>>[];
+  final strokes = <CanvasStroke>[];
+
+  @override
+  Future<StrokeSplats> generate(CanvasStroke stroke) {
+    strokes.add(stroke);
+    final request = Completer<StrokeSplats>();
+    requests.add(request);
+    return request.future;
+  }
+
+  Future<void> waitForRequests(int count) async {
+    for (var attempt = 0; attempt < 100; attempt++) {
+      if (requests.length >= count) return;
+      await Future<void>.delayed(Duration.zero);
+    }
+    fail('worker did not receive request $count');
+  }
+
+  StrokeSplats completeWithSplats(int index) {
+    final stroke = strokes[index];
+    final batch = PencilSplats.build(stroke.points, strokeSeed: stroke.seed);
+    final result = StrokeSplats(batch.count, batch.transforms, batch.colors);
+    requests[index].complete(result);
+    return result;
+  }
+
+  @override
+  void dispose() {}
+}
+
+Future<void> _verifyLateSplatIsIgnored({required bool replaceDocument}) async {
+  final worker = _ControlledSplatWorker();
+  final renderer = _renderer(worker: worker);
+  final cache = renderer.cache;
+  final key = TileKey(0, 0, 0);
+  final original = _documentOf([_shortHorizontal(1)]);
+  final current = replaceDocument
+      ? _documentOf([_shortHorizontal(0.7, y: 18)])
+      : original;
+  cache.attach(original);
+  cache.request(key);
+  await worker.waitForRequests(1);
+
+  if (replaceDocument) {
+    cache.attach(current);
+  } else {
+    cache.invalidateAll();
+  }
+  cache.request(key);
+  worker.completeWithSplats(0);
+  await worker.waitForRequests(2);
+  expect(cache.splatsIfReady(0), isNull);
+  expect(cache.counters.splatsGenerated, 0);
+
+  final currentSplats = worker.completeWithSplats(1);
+  await _waitForCacheIdle(cache);
+  expect(cache.splatsIfReady(0), same(currentSplats));
+  expect(cache.peek(key), isNotNull);
+}
+
+Future<void> _waitForCacheIdle(TileCache cache) async {
+  for (var attempt = 0; attempt < 200; attempt++) {
+    if (cache.idle) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail('tile cache never went idle');
+}
+
+/// The red channel of pixel (x, y) in [_frame] output. Ink is black on white,
 
 /// The red channel of pixel (x, y) in [_frame] output. Ink is black on white,
 /// so red alone measures darkness (255 = paper, 0 = full ink).
@@ -161,8 +249,9 @@ int _inked(ByteData bytes) {
 /// Reference: the same splats drawn directly, with no tiles or cache.
 ///
 /// Regenerates each stroke with PencilSplats.build (same seed) and draws it
-/// with one drawRawAtlas call, the way the pre-tile renderer did (ADR 0004),
-/// using [renderer]'s sprite. Used as ground truth for the tile pipeline.
+/// with one drawRawAtlas call, the way the pre-tile renderer did
+/// (design/canvas/pencil-splats.md), using [renderer]'s sprite. Used as ground
+/// truth for the tile pipeline.
 Future<ByteData> _direct(
   CanvasDocument document,
   TiledRenderer renderer,
@@ -196,7 +285,7 @@ Future<ByteData> _direct(
 }
 
 // The first four tests are the pixel-statistics assertions carried over from
-// the former PencilRenderer test (docs/status.md), now through the tile
+// the former PencilRenderer test, now through the tile
 // pipeline; the rest cover tiling behavior.
 void main() {
   test('a stroke renders as grainy specks, not a solid bar', () async {
@@ -305,8 +394,8 @@ void main() {
   });
 
   // This short stroke stays within one chunk. Its live stream and committed
-  // tile use the same nextSeed (CanvasStroke.seed, ADR 0005), so the frames
-  // compare byte for byte.
+  // tile use the same nextSeed (CanvasStroke.seed,
+  // design/canvas/tile-cache.md), so the frames compare byte for byte.
   test('committing a stroke does not change its grain', () async {
     final points = [
       const CanvasPoint(position: Offset(80, 20), weight: 1),
@@ -448,9 +537,10 @@ void main() {
     expect(rowInk(28), greaterThan(0));
   });
 
-  // Pins the "stale tile stays visible" rule of ADR 0005: TiledRenderer.paint
-  // draws a tile that is behind the document (TileCache.isCurrent false) from
-  // its old image while TileCache.request queues the update.
+  // Pins the "stale tile stays visible" rule of design/canvas/tile-cache.md:
+  // TiledRenderer.paint draws a tile that is behind the document
+  // (TileCache.isCurrent false) from its old image while TileCache.request
+  // queues the update.
   test('stale tiles keep showing the old image until the update lands', () async {
     final controller = CanvasController();
     addTearDown(controller.dispose);
@@ -477,7 +567,8 @@ void main() {
   // cached level-0 tile is drawn scaled up in its place. The loop then
   // repaints (zoomed() paints through a scaled canvas) until the real
   // level-2 tile lands. This is the "first zoom after drawing" scenario
-  // docs/status.md names for a bug where a tile whose strokes were already
+  // docs/design/canvas/tile-cache.md names for a bug where a tile whose
+  // strokes were already
   // generated was recorded blank (a SynchronousFuture inside Future.wait
   // returned an empty list); a blank level-2 tile would fail the final ink
   // comparison.
@@ -531,10 +622,11 @@ void main() {
     expect(_inked(settled), closeTo(_inked(first), _inked(first) * 0.25));
   });
 
-  // Regression for the eviction bug in docs/status.md: a constant maxTiles
+  // Regression for the eviction bug in docs/design/canvas/tile-cache.md: a
+  // constant maxTiles
   // smaller than the on-screen working set would evict visible tiles every
   // frame. TileCache._evictExcess now uses max(maxTiles, 2 x wanted) and
-  // skips wanted tiles. Confirmed in status.md to fail (2 of 6 tiles
+  // skips wanted tiles. Confirmed to fail (2 of 6 tiles
   // survive) with that protection disabled. This test drives TileCache
   // directly (setWanted + request, as paint() does each frame) with
   // maxTiles: 2 and six wanted tiles; the renderer is only borrowed for its
@@ -569,7 +661,7 @@ void main() {
   });
 
   // TileCache.attach discards every tile when given a different document
-  // instance (ADR 0005 "Document replacement"); painting an empty document
+  // instance (design/canvas/tile-cache.md, "Ownership and replacement"); painting an empty document
   // afterwards must show no leftover ink.
   test('replacing the document discards cached tiles', () async {
     final renderer = _renderer();
@@ -580,5 +672,60 @@ void main() {
     final bytes = await _settled(renderer, blank);
 
     expect(_inked(bytes), 0);
+  });
+  test('late splats are ignored after cache invalidation', () async {
+    await _verifyLateSplatIsIgnored(replaceDocument: false);
+  });
+
+  test('late splats are ignored after document replacement', () async {
+    await _verifyLateSplatIsIgnored(replaceDocument: true);
+  });
+
+  test('worker failures log once and retry after cache invalidation', () async {
+    final worker = _ControlledSplatWorker();
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    final renderer = _renderer(
+      worker: worker,
+      onSplatWorkerError: (error, stackTrace) {
+        unawaited(
+          logger.error(
+            'splat.worker.failed',
+            arguments: {'error': error.toString()},
+            stackTrace: stackTrace.toString(),
+          ),
+        );
+      },
+    );
+    final cache = renderer.cache;
+    final document = _documentOf([_shortHorizontal(1)]);
+    final key = TileKey(0, 0, 0);
+    cache.attach(document);
+    cache.request(key);
+    await worker.waitForRequests(1);
+
+    worker.requests.first.completeError(
+      StateError('worker failed'),
+      StackTrace.current,
+    );
+    await _waitForCacheIdle(cache);
+    cache.request(key);
+    await Future<void>.delayed(Duration.zero);
+    expect(worker.requests, hasLength(1));
+    expect(logger.entries, hasLength(1));
+    expect(logger.entries.single.messageId, 'splat.worker.failed');
+    expect(
+      logger.entries.single.arguments['error'],
+      contains('worker failed'),
+    );
+
+    cache.invalidateAll();
+    cache.request(key);
+    await worker.waitForRequests(2);
+    final splats = worker.completeWithSplats(1);
+    await _waitForCacheIdle(cache);
+
+    expect(cache.splatsIfReady(0), same(splats));
+    expect(logger.entries, hasLength(1));
   });
 }

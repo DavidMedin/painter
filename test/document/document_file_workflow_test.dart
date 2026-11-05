@@ -19,18 +19,20 @@
 // picker dialog itself is tested in file_picker_dialog_test.dart. Files are
 // really written and read, in a per-test temp directory deleted in tearDown.
 //
-// Not verified here (docs/status.md T-005): the Open/Save UI in the running
+// Not verified here (docs/status.md, T-005): the Open/Save UI in the running
 // macOS Release build (a live visual confirmation is still outstanding), the
 // default picker start directory or InAppDocumentFileService, and a dirty-state
 // prompt before open discards changes (a product decision still open in
-// ADR 0002). The failure test below checks structured file-operation records;
-// the brief's fatal-error scenario is not covered by this file.
+// docs/design/document/behavior.md). The failure test below checks structured
+// file-operation records; the fatal-error behavior in
+// docs/design/logging/behavior.md is not covered by this file.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart'
-    show AlertDialog, BuildContext, SelectableText, ValueKey;
+    show AlertDialog, BuildContext, SelectableText, SizedBox, ValueKey;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
@@ -239,6 +241,34 @@ void main() {
     expect(find.byType(PainterApp), findsOneWidget);
     expect(controller.document.strokes, hasLength(1));
   });
+  testWidgets('document failures log after PainterApp unmounts', (
+    tester,
+  ) async {
+    final pendingRead = Completer<String>();
+    final fileService = _PendingReadDocumentFileService(
+      openPath: '${temporaryDirectory.path}/pending.paint',
+      readCompleter: pendingRead,
+    );
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await tester.pumpWidget(
+      PainterApp(fileService: fileService, logger: logger),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pump();
+    expect(logger.entries, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    pendingRead.completeError(StateError('read failed'), StackTrace.current);
+    await tester.pump();
+
+    expect(logger.entries, hasLength(1));
+    expect(logger.entries.single.messageId, 'document.operation.failed');
+    expect(logger.entries.single.arguments['operation'], 'open');
+    expect(logger.entries.single.arguments['error'], contains('read failed'));
+    expect(logger.entries.single.stackTrace, isNotEmpty);
+    expect(find.byType(PainterApp), findsNothing);
+  });
 }
 
 /// Draws one short mouse stroke (14 x 8 units) starting at [offset] from the
@@ -300,4 +330,16 @@ class _TestDocumentFileService extends DocumentFileService {
   Future<void> writeDocument(String path, String contents) async {
     File(path).writeAsStringSync(contents);
   }
+}
+
+class _PendingReadDocumentFileService extends _TestDocumentFileService {
+  _PendingReadDocumentFileService({
+    required super.openPath,
+    required this.readCompleter,
+  });
+
+  final Completer<String> readCompleter;
+
+  @override
+  Future<String> readDocument(String path) => readCompleter.future;
 }

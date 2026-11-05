@@ -2,15 +2,17 @@
 // Why: Log records store stable ids and arguments rather than prose so wording
 //   changes and future translations do not require rewriting the log history.
 // Coupled to: painter_log.dart (record ids), log_widgets.dart (presentation),
-//   and docs/decisions/0014-file-backed-logging.md.
+//   and docs/design/logging/file-backed-logging.md.
 
 /// Templates for user-facing log messages, keyed by stable record id.
 abstract final class LogMessages {
   static const Map<String, String> templates = {
     'app.started': 'Painter started.',
     'settings.load.failed': 'Could not load settings: {error}',
+    'settings.persistence.failed': 'Could not save settings: {error}',
     'document.operation.failed':
         'Failed to {operation} Painter document: {error}',
+    'splat.worker.failed': 'Could not generate canvas splats: {error}',
     'flutter.framework.error': 'Flutter framework error: {error}',
     'error.unhandled': 'Unhandled application error: {error}',
     'log.file.invalid_entries':

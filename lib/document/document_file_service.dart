@@ -23,11 +23,11 @@
 // file_picker_dialog.dart (the dialog that actually shows the files).
 //
 // Why an in-house picker instead of a native dialog or plugin: decided in
-// docs/decisions/0002-saved-document-format-and-flow.md. The picker is built
+// docs/design/document/file-format-and-flow.md. The picker is built
 // from ordinary Flutter widgets so `flutter test` can drive the entire
 // open/save flow headlessly (navigate, type a name, confirm, cancel) with no
-// native dialog and no file-picker plugin dependency (docs/status.md T-005
-// notes no `file_selector` or other plugin was added). An earlier attempt with
+// native dialog and no file-picker plugin dependency (no `file_selector` or
+// other plugin was added). An earlier attempt with
 // native dialogs (`file_selector`) could not be verified in a local macOS VM
 // guest; the ADR records that story and keeps it on the
 // `vm-native-dialog-approach` branch. The cost, also from the ADR, is that the
@@ -51,7 +51,8 @@
 //      (CanvasDocument.fromJson / toJson in ../canvas/canvas_controller.dart).
 //   3. Errors are not caught here. File-system failures from
 //      readDocument / writeDocument propagate as exceptions to PainterApp,
-//      whose catch blocks show the error dialog (ADR 0002, brief "Errors").
+//      whose catch blocks show the error dialog
+//      (docs/design/document/behavior.md).
 //      Malformed documents are rejected later, by CanvasDocument.fromJson.
 // The save picker returns a path that always ends in `.paint`; the open
 // picker lists only directories and `.paint` files.
@@ -97,8 +98,9 @@ abstract class DocumentFileService {
 /// [InAppFilePicker], an in-app dialog, rather than a native file picker.
 class InAppDocumentFileService extends DocumentFileService {
   /// Where the picker opens: the user's home directory (`$HOME`), or the
-  /// process's current directory if `$HOME` is unset. ADR 0002 specifies
-  /// starting from the home directory.
+  /// process's current directory if `$HOME` is unset.
+  /// design/document/file-format-and-flow.md specifies starting from the home
+  /// directory.
   Directory _startDirectory() {
     final home = Platform.environment['HOME'];
     return home != null ? Directory(home) : Directory.current;

@@ -15,16 +15,16 @@
 // painting model: document path, file-operation state, pane renderers, logger,
 // contextual help, and touch-target size.
 // Why PainterApp owns the document path and the in-flight flag: the path is
-// not part of CanvasDocument (the saved format, docs/decisions/0002-saved-
-// document-format-and-flow.md, contains strokes only), and the controller
+// not part of CanvasDocument (the saved format, docs/design/document/
+// file-format-and-flow.md, contains strokes only), and the controller
 // has no notion of files. "Save writes to the associated path after the first
-// successful save" (ADR 0002) therefore needs a holder outside both the
-// document and the file service; this State is the only thing that sees both
-// the open and the save paths. The in-flight flag lives here because the
-// Open and Save buttons are built here and are disabled while it is set, and
-// because _openDocument and _saveDocument both check it so two overlapping
-// operations (for example Open while a Save dialog is up) cannot interleave
-// and race on _documentPath or on the controller's document.
+// successful save" (design/document/file-format-and-flow.md) therefore needs a
+// holder outside both the document and the file service; this State is the only
+// thing that sees both the open and the save paths. The in-flight flag lives
+// here because the Open and Save buttons are built here and are disabled while
+// it is set, and because _openDocument and _saveDocument both check it so two
+// overlapping operations (for example Open while a Save dialog is up) cannot
+// interleave and race on _documentPath or on the controller's document.
 //
 // Open flow (_openDocument): DocumentFileService.chooseOpenPath ->
 // DocumentFileService.readDocument -> jsonDecode ->
@@ -32,7 +32,7 @@
 // FormatException) -> CanvasController.replaceDocument -> reset each existing
 // Canvas pane's viewport -> remember the path. The document is replaced only
 // after every earlier step succeeded, so a failed open leaves it untouched
-// (ADR 0002).
+// (design/document/file-format-and-flow.md).
 //
 // Save flow (_saveDocument): use the remembered path, or ask
 // DocumentFileService.chooseSavePath with the suggested name 'Untitled.paint'
@@ -41,15 +41,16 @@
 // succeeded, so a failed first save does not make later saves silently
 // target a path that was never written.
 //
-// Error policy (docs/project-brief.md "Errors", ADR 0002 and ADR 0014): file
-// operation failures are recorded by [PainterLog] with a catalog message id,
-// arguments, and stack trace, then shown in an expandable-details popup. The
-// app continues running. [installFlutterLogHandlers] routes framework and
-// asynchronous errors to that same file-backed history. Fatal-error
-// classification remains undefined by the brief, so the handlers do not
-// invent one.
+// Error policy (docs/design/document/behavior.md, docs/design/logging/):
+// file operation failures are recorded by [PainterLog] with a catalog
+// message id, arguments, and stack trace, then shown in an expandable-details
+// popup. The app continues running. [installFlutterLogHandlers] routes
+// framework and asynchronous errors to that same file-backed history.
+// Fatal-error classification is an open question in
+// docs/design/logging/behavior.md, so the handlers do not invent one.
 //
-// Pane system (docs/decisions/0010-pane-system.md, ADRs 0012–0013): PaneSystem
+// Pane system (docs/design/panes/pane-system.md and
+// docs/design/controls/manual-pane.md): PaneSystem
 // owns the split tree, content modes, focus, and resize weights. PainterApp
 // retains a renderer per pane and an independent viewport per Canvas pane.
 // Diagnostics reads a visible Canvas pane's state or uses its own retained
@@ -58,6 +59,7 @@
 //
 // ---------------------------------------------------------------------------
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -172,8 +174,20 @@ class _PainterAppState extends State<PainterApp> {
     }
   }
 
-  TiledRenderer _rendererFor(int paneId) =>
-      _renderers.putIfAbsent(paneId, TiledRenderer.new);
+  TiledRenderer _rendererFor(int paneId) => _renderers.putIfAbsent(
+    paneId,
+    () => TiledRenderer(
+      onSplatWorkerError: (error, stackTrace) {
+        unawaited(
+          _logger.error(
+            'splat.worker.failed',
+            arguments: {'error': error.toString()},
+            stackTrace: stackTrace.toString(),
+          ),
+        );
+      },
+    ),
+  );
 
   CanvasViewportController _viewportFor(int paneId) =>
       _viewports.putIfAbsent(paneId, CanvasViewportController.new);
@@ -190,7 +204,10 @@ class _PainterAppState extends State<PainterApp> {
         renderer: paneRenderer,
       ),
       PaneKind.diagnostics => _diagnosticsContent(pane, paneRenderer),
-      PaneKind.settings => ThemeSettingsPane(controller: _settings),
+      PaneKind.settings => ThemeSettingsPane(
+        controller: _settings,
+        logger: _logger,
+      ),
       PaneKind.manual => ManualPane(
         helpId: pane.manualHelpId,
         onHelpIdSelected: pane.onManualHelpSelected,
@@ -263,8 +280,10 @@ class _PainterAppState extends State<PainterApp> {
       }
       _documentPath = path;
     } catch (error, stackTrace) {
-      if (!context.mounted) return;
-      await _showFileOperationError(context, 'open', error, stackTrace);
+      await _logFileOperationError('open', error, stackTrace);
+      if (context.mounted) {
+        await _showFileOperationError(context, 'open', error, stackTrace);
+      }
     } finally {
       if (mounted) setState(() => _fileOperationInProgress = false);
     }
@@ -272,9 +291,10 @@ class _PainterAppState extends State<PainterApp> {
 
   /// Runs the Save flow described in the overview at the top of this file.
   ///
-  /// Mirrors [_openDocument] (same in-flight guard, same error path through
-  /// [_showFileOperationError]). If a path is already associated the picker
-  /// is skipped; otherwise a cancelled picker (null path) aborts silently.
+  /// Mirrors [_openDocument] (same in-flight guard, then record the failure
+  /// before showing details if the action context remains mounted). The
+  /// behavior is specified in `docs/design/document/behavior.md`. If a path is
+  /// already associated the picker is skipped; cancelling it aborts silently.
   Future<void> _saveDocument(BuildContext context) async {
     if (_fileOperationInProgress) return;
     setState(() => _fileOperationInProgress = true);
@@ -286,32 +306,38 @@ class _PainterAppState extends State<PainterApp> {
       await _fileService.writeDocument(path, contents);
       if (mounted) _documentPath = path;
     } catch (error, stackTrace) {
-      if (!context.mounted) return;
-      await _showFileOperationError(context, 'save', error, stackTrace);
+      await _logFileOperationError('save', error, stackTrace);
+      if (context.mounted) {
+        await _showFileOperationError(context, 'save', error, stackTrace);
+      }
     } finally {
       if (mounted) setState(() => _fileOperationInProgress = false);
     }
   }
 
-  /// Logs a failed open/save and shows the popup with expandable details
-  /// required by docs/project-brief.md "Errors".
+  /// Records a failed open/save before any mounted-context check.
   ///
-  /// [operation] is the verb ('open' or 'save') spliced into the message.
-  /// Called only from the catch blocks of [_openDocument] and [_saveDocument].
-  /// The log happens before the `mounted` check so the failure is recorded
-  /// even if the widget is gone.
+  /// This keeps failures in the shared history if the pane was removed while
+  /// I/O was pending; the document behavior is specified in
+  /// `docs/design/document/behavior.md`.
+  Future<void> _logFileOperationError(
+    String operation,
+    Object error,
+    StackTrace stackTrace,
+  ) => _logger.error(
+    'document.operation.failed',
+    arguments: {'operation': operation, 'error': error.toString()},
+    stackTrace: stackTrace.toString(),
+  );
+
+  /// Shows the popup with expandable details required by
+  /// `docs/design/document/behavior.md`.
   Future<void> _showFileOperationError(
     BuildContext context,
     String operation,
     Object error,
     StackTrace stackTrace,
   ) async {
-    await _logger.error(
-      'document.operation.failed',
-      arguments: {'operation': operation, 'error': error.toString()},
-      stackTrace: stackTrace.toString(),
-    );
-    if (!context.mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(

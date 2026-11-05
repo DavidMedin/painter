@@ -1,6 +1,7 @@
 // What: Inherited app-wide selection for standard and enlarged hit targets.
-// Why: docs/project-brief.md requires control sizes configurable for touch use;
-//   shared controls read one setting instead of keeping independent sizes.
+// Why: docs/design/controls/behavior.md requires control sizes configurable
+//   for touch use; shared controls read one setting instead of keeping
+//   independent sizes.
 // Coupled to: PainterApp (owns the selection), PainterActionButton, diagnostic
 //   controls, picker rows, and the contextual help dialog.
 

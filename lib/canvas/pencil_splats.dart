@@ -6,9 +6,10 @@
 //
 // Why: Splat generation is the CPU-heavy part of rendering and must be
 // deterministic and independent of any GPU object so it can run in a worker
-// isolate (splat_worker.dart) and be unit-tested without a GPU (ADR 0004).
-// Keeping it separate from drawing (tiled_renderer.dart, tile_cache.dart) means
-// the look of the brush is defined in exactly one place.
+// isolate (splat_worker.dart) and be unit-tested without a GPU
+// (design/canvas/pencil-splats.md). Keeping it separate from drawing
+// (tiled_renderer.dart, tile_cache.dart) means the look of the brush is defined
+// in exactly one place.
 
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -22,14 +23,15 @@ import 'canvas_controller.dart';
 // gaussian sprite (32x32 px, black, alpha following exp(-r^2 / 2); built by
 // `TiledRenderer._buildSprite`) drawn with its own position, rotation, scale
 // and opacity. A stroke is a cloud of thousands of them (about 13 per document
-// unit at full weight, ADR 0004).
+// unit at full weight, design/canvas/pencil-splats.md).
 //
 // Why: The brush has to read as a pencil line from a distance while each mark
 // is a grain. The earlier renderer drew solid round-capped segments joined by
-// circles (ADR 0001), which cannot look grainy. Splats are derived at paint
-// time from the stroke's points and weights and are never stored, so the
-// saved-document format is unchanged and old `.paint` files render as pencil
-// without migration (ADR 0002, 0004). Drawing all splats of a stroke with one
+// circles (design/canvas/vector-canvas.md), which cannot look grainy. Splats
+// are derived at paint time from the stroke's points and weights and are never
+// stored, so the saved-document format is unchanged and old `.paint` files
+// render as pencil without migration (design/document/file-format-and-flow.md
+// and design/canvas/pencil-splats.md). Drawing all splats of a stroke with one
 // `Canvas.drawRawAtlas` call (see `SplatBatch`) is GPU instancing instead of
 // thousands of draw calls.
 //
@@ -49,9 +51,9 @@ import 'canvas_controller.dart';
 //   - Why determinism and prefix stability matter: a splat near a tile edge
 //     is drawn into both neighbouring tiles and must be identical in each or a
 //     seam shows; a tile rebuilt after eviction must reproduce the same
-//     specks; and each live chunk must look the same when committed (ADR 0005).
-//     Seeds come from `CanvasStroke.seed` (see the overview in
-//     canvas_controller.dart).
+//     specks; and each live chunk must look the same when committed
+//     (design/canvas/tile-cache.md). Seeds come from `CanvasStroke.seed` (see
+//     the overview in canvas_controller.dart).
 //   - Two consumers. Committed chunks: `TileCache._splatsFor` asks
 //     `SplatWorker.generate` (splat_worker.dart), whose isolate runs
 //     `PencilSplats.build` and returns `StrokeSplats`; `TileCache._build`
@@ -69,7 +71,7 @@ import 'canvas_controller.dart';
 // sprite. `inkMargin` is the bound `TileCache._touches` uses to decide which
 // tiles a stroke can reach. The spacing, density, size and alpha values are
 // first-pass choices judged on offscreen renders, not reviewed by an artist
-// (ADR 0004).
+// (design/canvas/pencil-splats.md).
 // ---------------------------------------------------------------------------
 
 /// Flat, GPU-ready buffers describing many small gaussian "pencil specks".

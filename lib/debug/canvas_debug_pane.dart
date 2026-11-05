@@ -2,7 +2,8 @@
 //   (`_Reading`). It lays out the tile-cache readouts and controls using the
 //   imgui kit and produces the plain-text report. This file also holds the
 //   debug-pane system overview (below).
-// Why: ADR 0006 wanted the tile cache's private, asynchronous state visible
+// Why: design/diagnostics/debug-pane.md wanted the tile cache's private,
+// asynchronous state visible
 //   in the running app. The pane is the only consumer of the core's
 //   diagnostic counters (../canvas/tile_stats.dart) and is separate from them
 //   so the core never imports debug UI. Layout primitives are in imgui.dart,
@@ -14,18 +15,18 @@
 // ---------------------------------------------------------------------------
 // What it is: a docked tool pane, shown when a pane's content selector chooses
 //   Diagnostics or when F3 adds a diagnostics pane beside the canvas. It shows
-//   how the tiled texture cache (ADR 0005) is behaving: which level of detail
-//   is drawn, how every visible tile was drawn (current, stale, coarser/finer
-//   fallback, missing, blank), cache occupancy, build queue, counters, splat
-//   memory, and viewport. It also has overlays drawn inside the canvas and a
-//   few controls.
+//   how the tiled texture cache (design/canvas/tile-cache.md) is behaving:
+//   which level of detail is drawn, how every visible tile was drawn (current,
+//   stale, coarser/finer fallback, missing, blank), cache occupancy, build
+//   queue, counters, splat memory, and viewport. It also has overlays drawn
+//   inside the canvas and a few controls.
 //
 // Why it exists: the cache is asynchronous and keeps most state private, so
 //   its claims (a stale tile stays visible, a coarser level shows scaled
 //   until the right one lands, only touched tiles rebuild) could be checked
 //   only with pixel tests. The pane makes them visible in a running app,
 //   allows tuning maxInFlight / maxTiles, and gives a text report for bug
-//   reports (ADR 0006, Context).
+//   reports (design/diagnostics/debug-pane.md, Context).
 //
 // The boundary rule (data flows one way):
 //   - TileCache, TiledRenderer, and tile statistics only record diagnostic
@@ -215,7 +216,8 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             ImText('Tile cache diagnostics', color: ImTheme.text(context)),
             // Frame: TileFrameStats level, recordMillis, activeSplats, and the
             // TiledRenderer.recordHistory plot. `record time` is UI-thread time
-            // spent recording draw calls, not raster or GPU time (ADR 0006).
+            // spent recording draw calls, not raster or GPU time
+            // (design/diagnostics/debug-pane.md).
             ImSection(
               title: 'Frame',
               children: [
@@ -403,9 +405,10 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
             // read the live `cache.maxInFlight` / `cache.maxTiles`, not the
             // snapshot, so the thumb follows the pointer at once; the "Tile
             // cache" readout rows come from the snapshot. Lowering `maxTiles`
-            // evicts on the next completed build, not instantly (ADR 0006).
-            // `invalidateAll()` drops all tiles and splats but keeps the document;
-            // the canvas rebuilds them on the next frame.
+            // evicts on the next completed build, not instantly
+            // (design/diagnostics/debug-pane.md). `invalidateAll()` drops all
+            // tiles and splats but keeps the document; the canvas rebuilds them
+            // on the next frame.
             ImSection(
               title: 'Controls',
               children: [
@@ -551,8 +554,8 @@ class _Reading {
       ..splatsGenerated = c.splatsGenerated
       ..splatsRastered = c.splatsRastered;
     // Counts every point of every stroke on each refresh, so this costs time
-    // proportional to document size (ADR 0006 notes behavior with very large
-    // documents was not verified).
+    // proportional to document size (design/diagnostics/debug-pane.md notes behavior with
+    // very large documents was not verified).
     var points = 0;
     for (final s in controller.document.strokes) {
       points += s.points.length;

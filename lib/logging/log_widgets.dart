@@ -8,6 +8,9 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../help/contextual_help.dart';
+import '../ui/touch_target_settings.dart';
+
 import 'painter_log.dart';
 
 /// Shows the newest structured record in the application's bottom bar.
@@ -123,29 +126,33 @@ class _LogPaneState extends State<LogPane> {
       itemBuilder: (context, index) {
         final entry = entries[index];
         final color = _levelColor(Theme.of(context).colorScheme, entry.level);
-        return ExpansionTile(
-          key: ValueKey('log-entry-${entry.timestamp}-$index'),
-          leading: Icon(Icons.circle, size: 10, color: color),
-          title: Text(entry.message),
-          subtitle: Text(
-            '${entry.timestamp.toLocal().toIso8601String()} · '
-            '${entry.level.name.toUpperCase()}',
-          ),
-          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          children: [
-            if (entry.arguments.isNotEmpty)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: SelectableText(
-                  'Arguments: ${jsonEncode(entry.arguments)}',
+        return HelpTarget(
+          topic: HelpIds.logEntryDetails,
+          child: ExpansionTile(
+            key: ValueKey('log-entry-${entry.timestamp}-$index'),
+            minTileHeight: TouchTargetSettings.height(context),
+            leading: Icon(Icons.circle, size: 10, color: color),
+            title: Text(entry.message),
+            subtitle: Text(
+              '${entry.timestamp.toLocal().toIso8601String()} · '
+              '${entry.level.name.toUpperCase()}',
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            children: [
+              if (entry.arguments.isNotEmpty)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SelectableText(
+                    'Arguments: ${jsonEncode(entry.arguments)}',
+                  ),
                 ),
-              ),
-            if (entry.stackTrace != null)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: SelectableText(entry.stackTrace!),
-              ),
-          ],
+              if (entry.stackTrace != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SelectableText(entry.stackTrace!),
+                ),
+            ],
+          ),
         );
       },
       separatorBuilder: (context, index) => const Divider(height: 1),

@@ -1,6 +1,7 @@
 // What: Widget tests drive synthetic pointer input through CanvasView and
 //   verify shared document updates, pane-local viewport state, and white paper.
-// Why: T-003 acceptance covers canvas controls (ADR 0001); ADR 0009 adds the
+// Why: T-003 acceptance covers canvas controls
+// (design/canvas/vector-canvas.md); design/canvas/tile-cache.md adds the
 //   bounded-chunk requirement, and pane behavior needs independent transforms.
 //   Mouse/stylus events are synthetic; dark-theme paper is checked as pixels.
 // Covers: lib/canvas/canvas_view.dart (CanvasView input and painting) and
@@ -16,7 +17,7 @@ import 'package:painter/canvas/canvas_controller.dart';
 import 'package:painter/canvas/canvas_view.dart';
 
 void main() {
-  // Mouse weight is always 1.0 regardless of pressure (docs/project-brief.md).
+  // Mouse weight is always 1.0 regardless of pressure (docs/design/canvas/behavior.md).
   // Here the canvas fills the test window from the origin (no AppBar), so a
   // local position equals a global one and the stored document-space points
   // can be compared directly with the event positions at the unchanged
@@ -76,9 +77,10 @@ void main() {
   });
 
   // Pressure 0.2 / 0.8 map through CanvasView._weightFor,
-  // 0.05 + 0.95 * pressure, to the expected 0.24 / 0.81 (ADR 0001 prototype
-  // values, not artist-approved). The events are built by hand so pressure,
-  // pressureMin and pressureMax can be set explicitly.
+  // 0.05 + 0.95 * pressure, to the expected 0.24 / 0.81
+  // (design/canvas/vector-canvas.md prototype values, not artist-approved). The
+  // events are built by hand so pressure, pressureMin and pressureMax can be
+  // set explicitly.
   testWidgets('stylus pressure changes stroke weight', (tester) async {
     final controller = await _pumpCanvas(tester);
     await tester.sendEventToBinding(
@@ -119,12 +121,12 @@ void main() {
     controller.dispose();
   });
 
-  // One test for the three mouse viewport controls (ADR 0001): secondary-
-  // button drag pans, vertical wheel zooms about the pointer, middle-button
-  // drag rotates. The zoom check asserts the document point under the pointer
-  // stays at the same screen position (toDocument before, toScreen after).
-  // Rotation of 50 px of drag giving 0.5 rad is the current dx / 100 rule in
-  // CanvasView.
+  // One test for the three mouse viewport controls
+  // (design/canvas/vector-canvas.md): secondary- button drag pans, vertical
+  // wheel zooms about the pointer, middle-button drag rotates. The zoom check
+  // asserts the document point under the pointer stays at the same screen
+  // position (toDocument before, toScreen after). Rotation of 50 px of drag
+  // giving 0.5 rad is the current dx / 100 rule in CanvasView.
   testWidgets('mouse buttons pan and rotate, and wheel zooms', (tester) async {
     final controller = await _pumpCanvas(tester);
     final viewport = tester

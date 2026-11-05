@@ -2,105 +2,41 @@
 
 ## Purpose
 
-Create painting software using Flutter and Dart.
+Create painting software using Flutter and Dart. The initial user is an artist. Painter is a macOS painting application today; Linux, Windows, and Android are future targets and their rollout order is undecided.
 
-## Confirmed Scope
+## Scope
 
-- Flutter/Dart is the intended application technology.
-- macOS is the current target. Linux, Windows, and Android are future targets; their rollout order is undecided.
-- The initial user is an artist.
-- On launch without a file, the app opens directly to a blank canvas ready for painting; there is no splash screen.
-- Appearance supports System, Light, and Dark modes. Light and dark palettes are
-  selected independently; Gruvbox Light and Gruvbox Dark are built in, and the
-  user can create and save custom palettes. Program UI colors follow the active
-  palette; canvas paper is fixed white regardless of app theme, and canvas marks
-  remain painting content rather than UI theme colors.
-- Appearance controls are available in selectable Settings pane content.
-- Pane layouts support side-by-side and top-and-bottom splits with draggable
-  dividers. Each content selector visibly identifies its selected pane mode.
-- Multiple Canvas panes show the same document but keep independent pan, zoom,
-  and rotation. Opening a document resets every Canvas pane's view.
+What Painter does is specified in the behavioral documents of the [design tree](design/README.md), one per system, in [EARS+](design/README.md#requirement-notation-ears). This brief does not restate it.
 
-## First Painting Workflow (T-004)
+| Behavior | Document |
+| --- | --- |
+| Drawing, viewport, paper, vector model, undo | [canvas](design/canvas/behavior.md) |
+| Launch, open, save, file errors | [document](design/document/behavior.md) |
+| Splits, content selection, borders, shortcuts | [panes](design/panes/behavior.md) |
+| Diagnostics pane | [diagnostics](design/diagnostics/behavior.md) |
+| Theme modes, palettes, persistence | [settings](design/settings/behavior.md) |
+| Hints, F1 help, Manual pane, touch targets | [controls](design/controls/behavior.md) |
+| Log, status bar, Log pane, fatal errors | [logging](design/logging/behavior.md) |
+| Node graph brushes (product direction) | [brush-graph](design/brush-graph/behavior.md) |
+| Node graph composition (product direction) | [composition](design/composition/behavior.md) |
 
-- The canvas supports mouse and stylus drawing with a pencil-like brush: each stroke is rendered as many small gaussian splats (specks) that read as a pencil line from a distance. See [ADR 0004](decisions/0004-pencil-splat-stroke-rendering.md).
-- Mouse drawing uses a fixed weight of `1.0`.
-- Stylus drawing uses a weight relative to stylus pressure.
-- Weight controls brush size only. There are no other brush settings in the MVP.
-- The mouse can pan, zoom, and rotate the canvas.
+Platform constraints and architectural priorities are in the [architecture overview](design/architecture-overview.md). How the project verifies behavior is in [testing](testing.md).
 
-## Document and File Lifecycle (T-005)
+## Product Differentiators
 
-- The MVP supports opening and saving files; it does not support export.
-- The user can open or save through a UI element.
-- A launch without a file creates a blank, unsaved canvas. Opening a file replaces the current canvas/document.
-	- Saving persists the current document. The exact behavior for saving a document that has no associated file is not yet specified.
+These distinguish Painter and require deliberate design. They are specified as behavior in the documents above.
 
-## Killer Features
+- **Node graph brushes:** every brush, from hard digital to oil and pencil, is defined by a node graph. See [brush-graph](design/brush-graph/behavior.md).
+- **Node graph composition:** there are no conventional layers. See [composition](design/composition/behavior.md).
+- **Everything is a vector:** brushes create mathematical marks that the canvas cache renders lazily, supporting arbitrary resolution and editing or undoing past strokes. See [canvas](design/canvas/behavior.md#vector-model-and-undo-product-direction).
+- **Undo undo undo:** strokes, including eraser strokes, go into an append-only store. See [canvas](design/canvas/behavior.md#vector-model-and-undo-product-direction).
 
-These features distinguish Painter and require deliberate design.
+## Open Questions
 
-### Node Graph Brushes
+Each question is recorded in the behavioral document of the system it affects; none is decided.
 
-Every brush, from hard digital to oil and pencil, is defined by a node graph.
-
-Graphs may need compilation to sustain thousands of evaluations per second. The technology is undecided; start with the simplest runnable evaluator. Initially, only brushes use graphs; magic wand and lasso behavior is undecided.
-
-### Node Graph Composition
-
-Painter has no conventional layers. Canvas nodes can be layered, modified, and connected to a render/output node. Selecting a node shows its output in a preview; the selected canvas node is editable in the Canvas window.
-
-### Everything is a vector
-
-Brushes create mathematical marks, such as gaussian splats or tiny textures, which the Canvas Cache renders lazily. This supports arbitrary resolution and editing or undoing past strokes.
-
-### Undo Undo Undo
-
-Use an append-only database*: strokes, including eraser strokes, overlay existing content to preserve vector editability.
-
-*Old data may be discarded when no longer relevant.
-
-## Errors
-
-- A failed file operation displays a popup explaining the error, with an expandable area for more detailed information. The failure is also recorded in the application log.
-- Failed file operations, internal errors, and exceptions are logged to the persistent application log and do not terminate the program. `--log-to-stdout` optionally mirrors readable lines to stdout; JSONL records retain message-catalog IDs and formatting arguments rather than rendered prose.
-- The latest record appears in the bottom status bar; the selectable Log pane shows records chronologically with the newest at the bottom.
-- Fatal errors terminate the program only after the error, stack trace, and other relevant information have been successfully logged.
-
-## Acceptance and Verification Scenarios
-
-- Launching without a file shows a blank, paint-ready canvas directly, with no splash screen.
-- A mouse stroke changes the canvas with a pencil-speck brush using weight `1.0`; a stylus stroke changes it with a pencil-speck brush whose size responds to pressure. Pressure changes size only.
-- Mouse input can pan, zoom, and rotate the canvas.
-- Opening a file replaces the current canvas/document with the opened content. Saving and reopening a document preserves its content.
-- Theme mode follows the system or stays explicitly light/dark; separate light
-  and dark palette selections and custom palette colors survive an app restart.
-- Canvas paper stays white in every theme. Multiple Canvas panes show the same
-  document with independent pan, zoom, and rotation, and opening a document
-  resets each view.
-- Panes can split side-by-side or top-and-bottom; their selected content mode
-  is visually emphasized, and each divider resizes only its adjacent panes.
-- A failed file operation shows the described popup and expandable details, is logged, and leaves the app running. A non-fatal internal error or exception is logged without terminating the app. A fatal error is logged with its stack trace and relevant information before termination.
-- Unit tests cover applicable isolated behavior. Integration tests cover interactions between modular components, including drawing a stroke and verifying the resulting canvas/document change. The finished macOS build must also demonstrate the user-visible scenarios; tests alone are insufficient.
-
-## UX
-
-Accessibility is a core requirement; document any temporary gaps.
-
-- Buttons have text, a leading action icon, and visible pressed feedback.
-- Interactive elements have concise hover hints that add to, rather than repeat, their labels.
-- Give distinct panes borders.
-- Windows are modular: choose each window's content from a top-left selector, as in Blender.
-- Make help available in-app for every interactive element; F1 opens help for the hovered control.
-
-## UI
-
-Keep the UI compact, useful, and configurable for touch. Blender is a visual reference.
-
-
-## Open Product and Technical Questions
-
-- What is the default brush size, and what exact pressure-to-size mapping should the stylus use?
-- Which mouse gestures or controls perform pan, zoom, and rotation?
-- What should happen when opening another file would discard unsaved changes?
-- Which errors are classified as fatal? The logging implementation is recorded in ADR 0014; fatal classification and termination policy remain undecided.
+- Default brush size and the stylus pressure-to-size mapping, and which mouse gestures pan, zoom, and rotate: [canvas](design/canvas/behavior.md#open-questions-non-normative).
+- What opening or saving does when there are unsaved changes or no associated file: [document](design/document/behavior.md#open-questions-non-normative).
+- Which errors are fatal: [logging](design/logging/behavior.md#open-questions-non-normative).
+- How brush graphs are compiled or evaluated, and whether magic wand and lasso use graphs: [brush-graph](design/brush-graph/behavior.md#open-questions-non-normative).
+- The rollout order of Linux, Windows, and Android: [architecture overview](design/architecture-overview.md#open-questions-non-normative).

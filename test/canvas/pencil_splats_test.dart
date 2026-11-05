@@ -1,7 +1,8 @@
 // What: unit tests of splat generation: PencilSplats.build turns a stroke's
 //   points into flat atlas buffers (SplatBatch) whose count, determinism,
 //   placement, pressure dependence, and opacity are checked numerically.
-// Why: ADR 0004 renders strokes as a cloud of gaussian splats derived from
+// Why: design/canvas/pencil-splats.md renders strokes as a cloud of gaussian
+// splats derived from
 //   the vector points, not stored. The look (a line that reads as pencil
 //   from afar, specks up close) and the guarantees later systems rely on
 //   (same stroke -> same specks, extending a stroke never moves earlier
@@ -78,9 +79,10 @@ void main() {
   });
 
   // PencilSplats.build is SplatStream run once, and TiledRenderer draws the
-  // in-progress stroke by extending a SplatStream (ADR 0005). Appending
-  // points must emit only new splats and leave the existing prefix of the
-  // buffers bit-identical; this test pins that prefix property.
+  // in-progress stroke by extending a SplatStream
+  // (design/canvas/tile-cache.md). Appending points must emit only new splats
+  // and leave the existing prefix of the buffers bit-identical; this test pins
+  // that prefix property.
   test('extending a stroke does not move specks already laid down', () {
     // The active stroke grows by one point per pointer move and is extended
     // through SplatStream; earlier specks must stay put or the line would

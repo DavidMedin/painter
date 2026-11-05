@@ -9,8 +9,8 @@
 //
 // ===========================================================================
 // SYSTEM OVERVIEW: the multi-resolution tiled texture cache
-// (decision record: docs/decisions/0005-tiled-texture-cache.md; debug
-// boundary: docs/decisions/0006-debug-pane.md)
+// (design: docs/design/canvas/tile-cache.md; debug boundary:
+// docs/design/diagnostics/debug-pane.md)
 // ===========================================================================
 //
 // What it is
@@ -23,11 +23,12 @@
 //   same memory (1 MiB) at any zoom.
 //
 // Why it exists
-//   The earlier design (ADR 0004) drew every stroke's splats every frame, so
-//   frame cost grew with the document (ADR 0005 measured 4.3 / 22 / 79 ms of
-//   UI-thread recording at 100 / 500 / 2000 strokes), even while panning.
-//   With tiles a frame draws only the visible textures, so cost follows
-//   screen area, not stroke count.
+//   The earlier design (design/canvas/pencil-splats.md) drew every stroke's
+//   splats every frame, so frame cost grew with the document
+//   (design/canvas/tile-cache.md measured 4.3 / 22 / 79 ms of UI-thread
+//   recording at 100 / 500 / 2000 strokes), even while panning. With tiles a
+//   frame draws only the visible textures, so cost follows screen area, not
+//   stroke count.
 //
 // How it works
 //   * Lazy and asynchronous. TiledRenderer.paint never builds anything: it
@@ -58,7 +59,8 @@
 //     setWanted) and tiles mid-build are never evicted, and the budget is
 //     max(maxTiles, 2 * working set) (_evictExcess). A constant maxTiles was
 //     a real bug: the working set reaches about 270 tiles when zoomed far
-//     out with a rotated view (docs/status.md), more than the default 256, so
+//     out with a rotated view (docs/design/canvas/tile-cache.md), more than
+//     the default 256, so
 //     on-screen tiles would have been evicted and rebuilt every frame.
 //   * Invalidation. _revision is bumped when a different CanvasDocument is
 //     attached or invalidateAll() runs. Each tile and each in-flight build
@@ -144,6 +146,7 @@ class TileCache extends ChangeNotifier {
     SplatWorker? worker,
     this.maxInFlight = 2,
     this.maxTiles = 256,
+    this.onSplatWorkerError,
   }) : _worker = worker ?? SplatWorker();
 
   /// The gaussian sprite every splat samples.
@@ -151,6 +154,14 @@ class TileCache extends ChangeNotifier {
   // Generates splats off the UI isolate; see _splatsFor. Disposed with this
   // cache.
   final SplatWorker _worker;
+
+  /// Reports worker failures to the app's shared persistent logger, as
+  /// specified in `docs/design/logging/file-backed-logging.md`.
+  final void Function(Object error, StackTrace stackTrace)? onSplatWorkerError;
+
+  /// Tile keys whose splat generation failed; retried after a cache revision
+  /// change, per `docs/design/canvas/tile-cache.md`.
+  final Set<TileKey> _failedTiles = {};
 
   /// Tile rasters allowed to run at once (checked in [_pump]). Mutable so the
   /// debug pane can tune it; the change applies on the next pump.
@@ -181,11 +192,9 @@ class TileCache extends ChangeNotifier {
   // scaled fallbacks); shielded from eviction. Set by setWanted.
   Set<TileKey> _wanted = const {};
 
-  // Per-stroke splat state, indexed by stroke index in the document. The
-  // future entry de-duplicates concurrent requests so each stroke is sent to
-  // the worker once; the value entry is kept for the session (not evicted;
-  // ADR 0005 lists this as a known memory cost). Cleared by attach() for a
-  // new document and by invalidateAll().
+  // Per-stroke splats are cached for the current revision. Futures deduplicate
+  // concurrent requests; a late result must not repopulate this list after a
+  // revision change. See docs/design/canvas/tile-cache.md.
   final List<StrokeSplats?> _splats = [];
   final List<Future<StrokeSplats>?> _splatFutures = [];
 
@@ -286,6 +295,7 @@ class TileCache extends ChangeNotifier {
     _evictAll();
     _splats.clear();
     _splatFutures.clear();
+    _failedTiles.clear();
     _queue.clear();
     _queued.clear();
     notifyListeners();
@@ -355,6 +365,7 @@ class TileCache extends ChangeNotifier {
       _evictAll();
       _splats.clear();
       _splatFutures.clear();
+      _failedTiles.clear();
       _queue.clear();
       _queued.clear();
     }
@@ -366,7 +377,7 @@ class TileCache extends ChangeNotifier {
   /// tile that is already queued or building, or before [attach].
   void request(TileKey key) {
     final document = _document;
-    if (document == null || _disposed) return;
+    if (document == null || _disposed || _failedTiles.contains(key)) return;
     final existing = _tiles[key];
     final applied = existing != null && existing.revision == _revision
         ? existing.appliedStrokes
@@ -440,21 +451,12 @@ class TileCache extends ChangeNotifier {
     }
   }
 
-  /// Builds or updates one tile: the core of the cache.
+  /// Builds or updates [key] for one cache revision, discarding stale work.
   ///
-  /// Steps: (1) pick the strokes not yet applied that touch the tile;
-  /// (2) get their splats (generated in the worker isolate, cached per
-  /// stroke); (3) rasterize them over the old image, or skip rastering when
-  /// none touch the tile; (4) store the result, record counters, evict, and
-  /// notify listeners. The `finally` re-requests the key because strokes may
-  /// have been appended while the raster ran.
-  ///
-  /// After every `await` the revision is re-checked: if the document was
-  /// replaced or the cache invalidated meanwhile, the result is dropped (and
-  /// the new image disposed) instead of being stored under the new revision.
-  ///
-  /// Coupled to: [_hasPending] (same selection rule), [_splatsFor],
-  /// [_rasterize], [_evictExcess], and `TileCacheCounters.recordBuild`.
+  /// Worker failures are logged by [_splatsFor] and suppress the tile until
+  /// the cache revision changes; see `docs/design/canvas/tile-cache.md`.
+  /// Coupled to: [_hasPending], [_splatsFor], [_rasterize], [_evictExcess], and
+  /// `TileCacheCounters.recordBuild`.
   Future<void> _build(TileKey key) async {
     final revision = _revision;
     final document = _document!;
@@ -518,13 +520,17 @@ class TileCache extends ChangeNotifier {
       counters.recordBuild(kind, clock.elapsed, rastered);
       _evictExcess();
       notifyListeners();
+    } on _SplatGenerationFailure {
+      if (!_disposed &&
+          revision == _revision &&
+          identical(document, _document)) {
+        _failedTiles.add(key);
+      }
     } on StateError {
-      // Worker disposed mid-flight (SplatWorker.generate throws StateError
-      // once disposed); nothing to do.
+      // Worker disposed mid-flight; nothing to do.
     } finally {
       _building.remove(key);
       if (!_disposed) {
-        // Strokes may have been added while this raster ran.
         request(key);
         _schedulePump();
       }
@@ -539,12 +545,28 @@ class TileCache extends ChangeNotifier {
       _splats.add(null);
       _splatFutures.add(null);
     }
+    final revision = _revision;
     return _splatFutures[index] ??= _worker
         .generate(document.strokeAt(index))
-        .then((value) {
-          counters.splatsGenerated += value.count;
-          return _splats[index] = value;
-        });
+        .then(
+          (value) {
+            if (!_disposed &&
+                revision == _revision &&
+                identical(document, _document)) {
+              counters.splatsGenerated += value.count;
+              _splats[index] = value;
+            }
+            return value;
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            final reportError = onSplatWorkerError;
+            if (reportError == null) {
+              Error.throwWithStackTrace(error, stackTrace);
+            }
+            reportError(error, stackTrace);
+            throw const _SplatGenerationFailure();
+          },
+        );
   }
 
   /// Rasterizes [strokes] into a new tile texture for [key], over [base] when
@@ -655,4 +677,8 @@ class TileCache extends ChangeNotifier {
     _worker.dispose();
     super.dispose();
   }
+}
+
+class _SplatGenerationFailure implements Exception {
+  const _SplatGenerationFailure();
 }

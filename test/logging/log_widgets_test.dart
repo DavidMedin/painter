@@ -3,8 +3,12 @@
 //   selectable pane, with the newest record at the scroll bottom.
 // Covers: lib/logging/log_widgets.dart and lib/main.dart Log-pane wiring.
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:painter/help/contextual_help.dart';
+import 'package:painter/help/manual_catalog.dart';
+import 'package:painter/ui/touch_target_settings.dart';
 import 'package:painter/logging/log_widgets.dart';
 import 'package:painter/logging/painter_log.dart';
 import 'package:painter/main.dart';
@@ -78,6 +82,58 @@ void main() {
     expect(find.text('[entry.0]'), findsNothing);
   });
 
+  testWidgets('Log records provide help and enlarged hit targets', (
+    tester,
+  ) async {
+    final log = PainterLog.memory();
+    final helpState = HelpState();
+    final pointer = TestPointer(44, PointerDeviceKind.mouse);
+    addTearDown(log.dispose);
+    addTearDown(helpState.dispose);
+    await log.error(
+      'settings.persistence.failed',
+      arguments: {'error': 'disk full'},
+      stackTrace: 'trace details',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TouchTargetSettings(
+            enlarged: true,
+            child: HelpScope(
+              helpState: helpState,
+              child: LogPane(log: log),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final record = find.byType(ExpansionTile);
+    expect(tester.getSize(record).height, greaterThanOrEqualTo(56));
+    final tooltip = tester.widget<Tooltip>(
+      find.ancestor(of: record, matching: find.byType(Tooltip)).first,
+    );
+    expect(
+      tooltip.message,
+      ManualCatalog.article(HelpIds.logEntryDetails).tooltip,
+    );
+    await tester.sendEventToBinding(pointer.hover(tester.getCenter(record)));
+    await tester.pump();
+    expect(helpState.activeTopic, HelpIds.logEntryDetails);
+    await tester.sendEventToBinding(pointer.hover(Offset.zero));
+    await tester.pump();
+    Focus.of(tester.element(record)).requestFocus();
+    await tester.pump();
+    expect(helpState.activeTopic, HelpIds.logEntryDetails);
+
+    await tester.tap(record);
+    await tester.pumpAndSettle();
+    expect(find.text('Arguments: {"error":"disk full"}'), findsOneWidget);
+    expect(find.text('trace details'), findsOneWidget);
+  });
   testWidgets('PainterApp exposes Log as a pane mode', (tester) async {
     final log = PainterLog.memory();
     addTearDown(log.dispose);

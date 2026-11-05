@@ -2,9 +2,10 @@
 // build ended), TileCacheCounters (cumulative cache activity), TileFrameStats
 // and TileDraw (how each visible tile was drawn in the last frame), and
 // TileInfo (a read-only snapshot of one tile).
-// Why: the debug pane (docs/decisions/0006-debug-pane.md) must see inside the
-// asynchronous cache, but the core must not depend on debug UI. These
-// classes are the one-way boundary: tile_cache.dart writes TileCacheCounters,
+// Why: the debug pane (docs/design/diagnostics/debug-pane.md) must see
+// inside the asynchronous cache, but the core must not depend on debug UI.
+// These classes are the one-way boundary: tile_cache.dart writes
+// TileCacheCounters,
 // tiled_renderer.dart writes TileFrameStats, and lib/debug/ only reads them.
 // They hold no logic beyond bookkeeping so recording stays cheap even when
 // the pane is closed. The system overview is in tile_cache.dart.

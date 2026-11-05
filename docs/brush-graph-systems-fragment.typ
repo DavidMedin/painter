@@ -35,9 +35,9 @@ _Research note, not an architecture decision._ Painter presently stores immutabl
 
 == Sources
 
-[1] Painter project brief, “Node Graph Brushes” and “Node Graph Composition”: `docs/project-brief.md` (local project source).
+[1] Painter node graph brush and composition behavior: `docs/design/brush-graph/behavior.md` and `docs/design/composition/behavior.md` (local project source).
 
-[2] Painter architecture, “Canvas Architecture”: `docs/architecture.md` (local project source).
+[2] Painter canvas design: `docs/design/canvas/` (local project source).
 
 [3] Blender Manual, “Nodes”: #link("https://docs.blender.org/manual/en/latest/interface/controls/nodes/index.html")[docs.blender.org/manual/en/latest/interface/controls/nodes/index.html].
 

@@ -224,7 +224,7 @@ The current brief says mouse input can pan, zoom, and rotate, while the architec
 
 == Open over unsaved work
 
-The product brief lists this as unresolved, but ADR 0002 already records the current choice: opening replaces the document without an unsaved-changes prompt. The brief must either accept that behavior explicitly for the MVP or change it. Options are immediate discard, confirmation prompt, or recoverable autosave. The safe default for artist work is a prompt once dirty tracking exists, but it is not free: the app needs a reliable dirty-state invariant, dialog choices, and tests for save failure/cancel. Until then, explicitly document that Open discards unsaved work so behavior is not mistaken for an omitted feature.
+The document behavior specification lists this as an open question, but its design document (`docs/design/document/file-format-and-flow.md`) already records the current choice: opening replaces the document without an unsaved-changes prompt. The brief must either accept that behavior explicitly for the MVP or change it. Options are immediate discard, confirmation prompt, or recoverable autosave. The safe default for artist work is a prompt once dirty tracking exists, but it is not free: the app needs a reliable dirty-state invariant, dialog choices, and tests for save failure/cancel. Until then, explicitly document that Open discards unsaved work so behavior is not mistaken for an omitted feature.
 
 == Focused node preview and Canvas editing
 
@@ -281,7 +281,7 @@ These are scenario templates, not claims that the project has already met them. 
 
 = Source guide
 
-Project-local evidence is in `docs/project-brief.md`, `docs/architecture.md`, `docs/status.md`, #link("decisions/0002-saved-document-format-and-flow.md")[ADR 0002], #link("decisions/0004-pencil-splat-stroke-rendering.md")[ADR 0004], and #link("decisions/0005-tiled-texture-cache.md")[ADR 0005]. These record current intended scope and architecture; where the brief and accepted ADR/code disagree, the report identifies the conflict rather than treating one as an industry fact.
+Project-local evidence is in `docs/project-brief.md`, `docs/design/architecture-overview.md`, `docs/status.md`, #link("design/document/file-format-and-flow.md")[document format and flow], #link("design/canvas/pencil-splats.md")[pencil splats], and #link("design/canvas/tile-cache.md")[tile cache]. These record current intended scope and architecture; where the brief and the accepted design documents or code disagree, the report identifies the conflict rather than treating one as an industry fact.
 
 The external comparisons use official product or standards documentation:
 

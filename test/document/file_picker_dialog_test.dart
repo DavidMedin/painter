@@ -1,11 +1,11 @@
 // What: Widget tests of InAppFilePicker on its own: listing only directories
 //   and `.paint` files, open mode (tap a file, navigate into a directory),
 //   save mode (typed name gets `.paint` appended), and cancel returning null.
-// Why: ADR 0002 replaced the native file dialogs with this in-house picker so
-//   the Open/Save flow can be driven headlessly; docs/status.md (T-005) calls
-//   this file "the part that replaces the native file dialog and is exactly
-//   what could not be driven headlessly before". These tests are what make
-//   that claim true for the picker's own UI.
+// Why: docs/design/document/file-format-and-flow.md replaced the native file
+//   dialogs with this in-house picker so the Open/Save flow can be driven
+//   headlessly. This file tests the part that replaces the native file
+//   dialog, which could not be driven headlessly before. These tests are what
+//   make that claim true for the picker's own UI.
 // Covers: lib/document/file_picker_dialog.dart (InAppFilePicker,
 //   FilePickerMode, InAppFilePicker.show). The app-level flow that uses the
 //   picker through InAppDocumentFileService is not covered here; see

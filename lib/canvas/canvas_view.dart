@@ -8,8 +8,8 @@
 // (canvas_controller.dart) and the tile pipeline (tiled_renderer.dart,
 // tile_cache.dart). The widget owns no document state; it is the only place
 // that knows which button or gesture means "draw", "pan", "zoom" or "rotate",
-// so changing controls (ADR 0001, ADR 0003) never touches the model or the
-// renderer.
+// so changing controls (design/canvas/vector-canvas.md,
+// design/canvas/vector-canvas.md) never touches the model or the renderer.
 
 import 'dart:math' as math;
 
@@ -29,7 +29,7 @@ import 'tiled_renderer.dart';
 //
 // What: One `Listener` (built in `_CanvasViewState.build`) receives raw Flutter
 // pointer events and maps them to controller calls. Flutter pointer events are
-// used directly, with no native input plugin (ADR 0001).
+// used directly, with no native input plugin (design/canvas/vector-canvas.md).
 //
 //   Mouse (PointerDeviceKind.mouse), chosen at pointer-down by
 //   `_mouseInteraction` and fixed for the whole drag:
@@ -40,7 +40,8 @@ import 'tiled_renderer.dart';
 //   If several buttons are down at once, secondary wins over middle over
 //   primary.
 //   Stylus: always draws; weight comes from pressure (below).
-//   Trackpad (PointerDeviceKind.trackpad, PointerPanZoom* events, ADR 0003):
+//   Trackpad (PointerDeviceKind.trackpad, PointerPanZoom* events,
+//   design/canvas/vector-canvas.md):
 //     two-finger scroll -> pan   (event.panDelta)
 //     pinch             -> zoom  (cumulative event.scale -> incremental factor)
 //     two-finger twist  -> rotate (cumulative event.rotation -> incremental)
@@ -49,12 +50,12 @@ import 'tiled_renderer.dart';
 //   to where it began. The trackpad stream is separate from the mouse
 //   down/move/signal stream and is additive to it. The rotation sign is taken
 //   from Flutter unchanged; if it feels reversed on hardware, only the sign
-//   in `_onPanZoomUpdate` needs to change (ADR 0003).
+//   in `_onPanZoomUpdate` needs to change (design/canvas/vector-canvas.md).
 //   Other device kinds (e.g. touch) are ignored by `_onPointerDown`.
 //
 // Pressure -> weight (`_weightFor`): pressure is normalized with the event's
 // pressureMin/pressureMax and mapped linearly to weight 0.05-1.0. These are
-// prototype values (ADR 0001, docs/architecture.md "Prototype parameters"),
+// prototype values (design/canvas/vector-canvas.md, "Prototype parameters"),
 // not a resolved product mapping, and physical stylus behavior is unverified.
 // Weight changes brush size only. `CanvasController._clampWeight` and
 // `CanvasDocument.fromJson` use the same 0.05-1 range.
@@ -223,7 +224,7 @@ class _CanvasViewState extends State<CanvasView> {
   }
 
   /// Trackpad gesture start: remembers the focal point that every zoom and
-  /// rotate in this gesture is anchored to (ADR 0003).
+  /// rotate in this gesture is anchored to (design/canvas/vector-canvas.md).
   void _onPanZoomStart(PointerPanZoomStartEvent event) {
     _trackpadGesture = _TrackpadGesture(event.localPosition);
   }

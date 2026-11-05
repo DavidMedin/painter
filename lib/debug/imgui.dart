@@ -3,8 +3,8 @@
 //   ImSliderInt, ImPlot, ImStackedBar (with ImSegment), ImLegend, and imCopy.
 //   This file is also where the kit's system overview lives (below).
 // Why: The debug pane (canvas_debug_pane.dart) wants a dense, flat,
-//   monospace "immediate-mode look" (ADR 0006). The ADR chose to write it
-//   as plain Flutter widgets with no new dependency, in a file that knows
+//   monospace "immediate-mode look" (design/diagnostics/debug-pane.md). That design
+//   chose to write it as plain Flutter widgets with no new dependency, in a file that knows
 //   nothing about the painter. Keeping the kit apart from the pane keeps the
 //   pane file about *what* is shown and this file about *how* it looks.
 //   Only canvas_debug_pane.dart and tile_overlay.dart (for colors) import it.
@@ -18,7 +18,8 @@
 //   ImCheckbox, ImButton, ImSliderInt), and small visualisations (ImPlot line
 //   plot, ImStackedBar + ImLegend).
 //
-// Why it exists: ADR 0006 wanted the tile cache's internals visible in the
+// Why it exists: design/diagnostics/debug-pane.md wanted the tile cache's
+// internals visible in the
 //   running app in an "immediate-mode look". The ADR states the kit is NOT an
 //   immediate-mode engine and takes no dependency: it is written with
 //   ordinary Flutter widgets, which rebuild normally. The ADR does not record

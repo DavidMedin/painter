@@ -2,7 +2,8 @@
 //   that pane readouts, controls, overlay switches and reports track the real
 //   tile cache, canvas controller and CanvasDebugOptions; plus two plain unit
 //   tests on CanvasDebugOptions and the tile-draw colors.
-// Why: The pane (ADR 0006) is the only way to observe the asynchronous tile
+// Why: The pane (design/diagnostics/debug-pane.md) is the only way to observe
+// the asynchronous tile
 //   cache in the app. A readout that lies or a control that does nothing defeats
 //   its purpose. Tests also cover pause freezing every readout.
 // Covers: lib/debug/canvas_debug_pane.dart, lib/debug/canvas_debug_options.dart,
@@ -191,7 +192,7 @@ void main() {
     expect(_row(tester, 'idle'), 'yes');
   });
 
-  // Regression (status.md bug 3): the pane used to mix frozen and live reads,
+  // Regression (docs/design/diagnostics/debug-pane.md, Regression Notes): the pane used to mix frozen and live reads,
   // so Pause did not actually freeze every readout and the report could
   // disagree with the screen. The test compares every Text widget while
   // paused after a stroke, new tiles, a pan and more frames. It also checks

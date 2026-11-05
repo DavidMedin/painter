@@ -6,7 +6,7 @@
 //   Keeping them in their own file means the canvas imports only this small
 //   model, never the pane widget (CanvasDebugPane); it still reaches the
 //   imgui kit indirectly, because tile_overlay.dart takes its colors from
-//   ImTheme (ADR 0006, "Overlays draw in the canvas"). The pane and the
+//   ImTheme (design/diagnostics/debug-pane.md, "Overlays"). The pane and the
 //   canvas share one instance, created in lib/main.dart.
 import 'package:flutter/foundation.dart';
 

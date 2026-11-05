@@ -1,9 +1,9 @@
 // What: PaneKind, PaneDescriptor, and PaneSystem provide selectable content
 //   panes arranged as a resizable two-axis split tree.
-// Why: docs/project-brief.md requires modular panes with per-pane content
-//   selectors. A floating diagnostics overlay cannot provide independent
-//   side-by-side and top-and-bottom content; ADR 0010 records the docked layout
-//   decision.
+// Why: docs/design/panes/behavior.md requires modular panes with per-pane
+//   content selectors. A floating diagnostics overlay cannot provide
+//   independent side-by-side and top-and-bottom content;
+//   docs/design/panes/pane-system.md records the docked layout decision.
 // Coupled to: main.dart (content builder and per-pane state ownership),
 //   contextual_help.dart (pane control ids), manual_catalog.dart and
 //   manual_pane.dart (manual navigation), logging/ (Log content mode), and
@@ -272,7 +272,13 @@ class PaneSystemState extends State<PaneSystem> {
         final extent = split.axis == Axis.horizontal
             ? constraints.maxWidth
             : constraints.maxHeight;
-        final dividerExtent = math.min(12.0, math.max(0.0, extent));
+        final minimumDividerExtent = split.axis == Axis.vertical
+            ? TouchTargetSettings.height(context)
+            : 12.0;
+        final dividerExtent = math.min(
+          minimumDividerExtent,
+          math.max(0.0, extent),
+        );
         final available = math.max(0.0, extent - dividerExtent);
         final firstFlex = math.max(1, (split.firstWeight * 1000).round());
         final secondFlex = math.max(1, (split.secondWeight * 1000).round());
@@ -378,6 +384,7 @@ class PaneSystemState extends State<PaneSystem> {
                             iconEnabledColor: scheme.onPrimaryContainer,
                             dropdownColor: scheme.surface,
                             borderRadius: BorderRadius.circular(4),
+                            itemHeight: height,
                             items: [
                               for (final kind in PaneKind.values)
                                 DropdownMenuItem(
@@ -429,13 +436,15 @@ class PaneSystemState extends State<PaneSystem> {
                       key: ValueKey('split-menu-${pane.id}'),
                       padding: EdgeInsets.zero,
                       onSelected: (axis) => _splitPane(pane.id, axis: axis),
-                      itemBuilder: (context) => const [
+                      itemBuilder: (context) => [
                         PopupMenuItem(
                           value: Axis.horizontal,
+                          height: TouchTargetSettings.height(context),
                           child: Text('Side by side'),
                         ),
                         PopupMenuItem(
                           value: Axis.vertical,
+                          height: TouchTargetSettings.height(context),
                           child: Text('Top and bottom'),
                         ),
                       ],
@@ -499,58 +508,64 @@ class PaneSystemState extends State<PaneSystem> {
     double height,
     ColorScheme scheme,
   ) {
-    return PopupMenuButton<_CompactPaneAction>(
-      key: ValueKey('pane-actions-${pane.id}'),
-      tooltip: 'Pane actions: ${pane.kind.label}',
-      onSelected: (action) {
-        switch (action) {
-          case _CompactPaneAction.canvas:
-            _setPaneKind(pane.id, PaneKind.canvas);
-          case _CompactPaneAction.diagnostics:
-            _setPaneKind(pane.id, PaneKind.diagnostics);
-          case _CompactPaneAction.settings:
-            _setPaneKind(pane.id, PaneKind.settings);
-          case _CompactPaneAction.manual:
-            _setPaneKind(pane.id, PaneKind.manual);
-          case _CompactPaneAction.log:
-            _setPaneKind(pane.id, PaneKind.log);
-          case _CompactPaneAction.splitSideBySide:
-            _splitPane(pane.id, axis: Axis.horizontal);
-          case _CompactPaneAction.splitTopAndBottom:
-            _splitPane(pane.id, axis: Axis.vertical);
-          case _CompactPaneAction.close:
-            _closePane(pane.id);
-        }
-      },
-      itemBuilder: (context) => [
-        for (final kind in PaneKind.values)
+    return HelpTarget(
+      topic: HelpIds.paneBoundary,
+      child: PopupMenuButton<_CompactPaneAction>(
+        key: ValueKey('pane-actions-${pane.id}'),
+        onSelected: (action) {
+          switch (action) {
+            case _CompactPaneAction.canvas:
+              _setPaneKind(pane.id, PaneKind.canvas);
+            case _CompactPaneAction.diagnostics:
+              _setPaneKind(pane.id, PaneKind.diagnostics);
+            case _CompactPaneAction.settings:
+              _setPaneKind(pane.id, PaneKind.settings);
+            case _CompactPaneAction.manual:
+              _setPaneKind(pane.id, PaneKind.manual);
+            case _CompactPaneAction.log:
+              _setPaneKind(pane.id, PaneKind.log);
+            case _CompactPaneAction.splitSideBySide:
+              _splitPane(pane.id, axis: Axis.horizontal);
+            case _CompactPaneAction.splitTopAndBottom:
+              _splitPane(pane.id, axis: Axis.vertical);
+            case _CompactPaneAction.close:
+              _closePane(pane.id);
+          }
+        },
+        itemBuilder: (context) => [
+          for (final kind in PaneKind.values)
+            PopupMenuItem(
+              value: switch (kind) {
+                PaneKind.canvas => _CompactPaneAction.canvas,
+                PaneKind.diagnostics => _CompactPaneAction.diagnostics,
+                PaneKind.settings => _CompactPaneAction.settings,
+                PaneKind.manual => _CompactPaneAction.manual,
+                PaneKind.log => _CompactPaneAction.log,
+              },
+              height: height,
+              child: Text(kind.label),
+            ),
           PopupMenuItem(
-            value: switch (kind) {
-              PaneKind.canvas => _CompactPaneAction.canvas,
-              PaneKind.diagnostics => _CompactPaneAction.diagnostics,
-              PaneKind.settings => _CompactPaneAction.settings,
-              PaneKind.manual => _CompactPaneAction.manual,
-              PaneKind.log => _CompactPaneAction.log,
-            },
-            child: Text(kind.label),
+            value: _CompactPaneAction.splitSideBySide,
+            height: height,
+            child: Text('Split side-by-side'),
           ),
-        const PopupMenuItem(
-          value: _CompactPaneAction.splitSideBySide,
-          child: Text('Split side-by-side'),
-        ),
-        const PopupMenuItem(
-          value: _CompactPaneAction.splitTopAndBottom,
-          child: Text('Split top-and-bottom'),
-        ),
-        if (_panes.length > 1)
-          const PopupMenuItem(
-            value: _CompactPaneAction.close,
-            child: Text('Close pane'),
+          PopupMenuItem(
+            value: _CompactPaneAction.splitTopAndBottom,
+            height: height,
+            child: Text('Split top-and-bottom'),
           ),
-      ],
-      child: SizedBox(
-        height: height,
-        child: Center(child: Icon(pane.kind.icon, color: scheme.primary)),
+          if (_panes.length > 1)
+            PopupMenuItem(
+              value: _CompactPaneAction.close,
+              height: height,
+              child: Text('Close pane'),
+            ),
+        ],
+        child: SizedBox(
+          height: height,
+          child: Center(child: Icon(pane.kind.icon, color: scheme.primary)),
+        ),
       ),
     );
   }
@@ -629,26 +644,32 @@ class PaneSystemState extends State<PaneSystem> {
       items: [
         PopupMenuItem(
           value: _BoundaryAction(firstPane.id, axis: Axis.horizontal),
+          height: TouchTargetSettings.height(context),
           child: Text('Split $firstSide pane side-by-side'),
         ),
         PopupMenuItem(
           value: _BoundaryAction(firstPane.id, axis: Axis.vertical),
+          height: TouchTargetSettings.height(context),
           child: Text('Split $firstSide pane top-and-bottom'),
         ),
         PopupMenuItem(
           value: _BoundaryAction(firstPane.id),
+          height: TouchTargetSettings.height(context),
           child: Text('Close $firstSide pane'),
         ),
         PopupMenuItem(
           value: _BoundaryAction(secondPane.id, axis: Axis.horizontal),
+          height: TouchTargetSettings.height(context),
           child: Text('Split $secondSide pane side-by-side'),
         ),
         PopupMenuItem(
           value: _BoundaryAction(secondPane.id, axis: Axis.vertical),
+          height: TouchTargetSettings.height(context),
           child: Text('Split $secondSide pane top-and-bottom'),
         ),
         PopupMenuItem(
           value: _BoundaryAction(secondPane.id),
+          height: TouchTargetSettings.height(context),
           child: Text('Close $secondSide pane'),
         ),
       ],

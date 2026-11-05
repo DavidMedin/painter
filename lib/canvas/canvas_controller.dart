@@ -29,10 +29,11 @@ import 'package:flutter/material.dart';
 // is transient and is not part of the saved document.
 //
 // Why this split: document coordinates must not depend on the viewport
-// (ADR 0001), so panning, zooming and rotating never touch the document and
-// the tile cache (tile_cache.dart) stays valid across them. Bounded chunks let
-// TileCache advance its per-tile `CachedTile.appliedStrokes` count while a
-// pointer gesture continues, instead of keeping its entire splat batch live.
+// (design/canvas/vector-canvas.md), so panning, zooming and rotating never
+// touch the document and the tile cache (tile_cache.dart) stays valid across
+// them. Bounded chunks let TileCache advance its per-tile
+// `CachedTile.appliedStrokes` count while a pointer gesture continues, instead
+// of keeping its entire splat batch live.
 //
 // Why strokes are immutable: tiles, splat buffers (`SplatWorker`) and
 // bounds are derived from a stroke once and reused for the session. A stroke
@@ -45,29 +46,32 @@ import 'package:flutter/material.dart';
 // so strokes tracing the same path still get different specks. The seed is
 // not saved: `fromJson` re-derives it from stroke order, which equals the
 // order they were drawn, so a saved-and-reopened document looks the same
-// (ADR 0005). Active chunks borrow `CanvasDocument.nextSeed`, so each chunk's
-// grain stays stable when committed. Long pointer gestures therefore consist
-// of several independently seeded document strokes.
+// (design/canvas/tile-cache.md). Active chunks borrow
+// `CanvasDocument.nextSeed`, so each chunk's grain stays stable when committed.
+// Long pointer gestures therefore consist of several independently seeded
+// document strokes.
 //
 // Why `ChangeNotifier` and no state-management package: the whole state is
 // one object with a handful of mutators; widgets and painters just listen
 // (`_CanvasPainter` repaints via `Listenable.merge([controller, ...])`).
-// ADR 0001 chose this to avoid a dependency while keeping mutation out of
-// widget painting code.
+// design/canvas/vector-canvas.md chose this to avoid a dependency while keeping
+// mutation out of widget painting code.
 //
-// Saved format (ADR 0002): UTF-8 JSON, format identifier `painter-document`,
-// integer version 1:
+// Saved format (design/document/file-format-and-flow.md): UTF-8 JSON, format
+// identifier `painter-document`, integer version 1:
 //   {"format": "painter-document", "version": 1,
 //    "strokes": [[{"x": 1.0, "y": 2.0, "weight": 0.5}, ...], ...]}
 // Only document-space points and weights are stored; splats are derived at
-// paint time (ADR 0004), so no pencil-specific data is in the file. The
-// identifier and version let incompatible files be rejected instead of
-// misread. The file I/O itself lives in ../main.dart (`jsonEncode(toJson())`
-// / `CanvasDocument.fromJson(jsonDecode(...))`) and lib/document/.
+// paint time (design/canvas/pencil-splats.md), so no pencil-specific data is in
+// the file. The identifier and version let incompatible files be rejected
+// instead of misread. The file I/O itself lives in ../main.dart
+// (`jsonEncode(toJson())` / `CanvasDocument.fromJson(jsonDecode(...))`) and
+// lib/document/.
 //
 // Prototype values: `brushDiameter`, the weight range 0.05-1 and the zoom
-// limits are prototype choices, not settled product values (ADR 0001,
-// docs/architecture.md "Prototype parameters").
+// limits are prototype choices, not settled product values
+// (design/canvas/vector-canvas.md, design/canvas/vector-canvas.md "Prototype
+// parameters").
 // ---------------------------------------------------------------------------
 
 /// One sampled input point of a stroke: a document-space [position] and a
@@ -157,7 +161,8 @@ class CanvasDocument {
   static const int formatVersion = 1;
 
   /// Serializes to the `painter-document` JSON shape described in the
-  /// overview above (ADR 0002). Seeds and viewport are intentionally omitted.
+  /// overview above (design/document/file-format-and-flow.md). Seeds and
+  /// viewport are intentionally omitted.
   Map<String, Object?> toJson() => {
     'format': formatIdentifier,
     'version': formatVersion,
@@ -363,8 +368,8 @@ class CanvasController extends ChangeNotifier {
 /// every Canvas pane listens to both objects so document changes appear in all
 /// views without coupling their individual view transforms.
 class CanvasViewportController extends ChangeNotifier {
-  /// Prototype zoom limits (ADR 0001). The tile levels in `TileGrid`
-  /// (`minLevel`..`maxLevel`) are sized to span this range.
+  /// Prototype zoom limits (design/canvas/vector-canvas.md). The tile levels in
+  /// `TileGrid` (`minLevel`..`maxLevel`) are sized to span this range.
   static const double minimumZoom = 0.1;
   static const double maximumZoom = 16;
 

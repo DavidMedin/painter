@@ -1,6 +1,7 @@
 // What: HelpState and HelpTarget expose stable manual ids to controls and F1.
-// Why: docs/project-brief.md requires help to follow the hovered interactive
-//   control. Article text and navigation live centrally in manual_catalog.dart.
+// Why: docs/design/controls/behavior.md requires help to follow the hovered
+//   interactive control. Article text and navigation live centrally in
+//   manual_catalog.dart.
 // Coupled to: manual_catalog.dart (ids and tooltips), manual_pane.dart (pages),
 //   and lib/main.dart (owns state and routes F1 to the pane system).
 //

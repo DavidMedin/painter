@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/help/contextual_help.dart';
 import 'package:painter/help/manual_catalog.dart';
 import 'package:painter/help/manual_pane.dart';
+import 'package:painter/ui/touch_target_settings.dart';
 import 'package:painter/ui/pane_system.dart';
 
 Widget _content(BuildContext context, PaneDescriptor pane) =>
@@ -26,15 +27,19 @@ Widget _manualContent(BuildContext context, PaneDescriptor pane) =>
 Widget _host({
   GlobalKey<PaneSystemState>? paneSystemKey,
   PaneContentBuilder contentBuilder = _content,
+  bool enlarged = false,
 }) {
   return MaterialApp(
     home: Scaffold(
       body: SizedBox.expand(
-        child: PaneSystem(
-          key: paneSystemKey,
-          contentBuilder: contentBuilder,
-          onPaneRemoved: (_) {},
-          onPaneTypeChanged: (_, _) {},
+        child: TouchTargetSettings(
+          enlarged: enlarged,
+          child: PaneSystem(
+            key: paneSystemKey,
+            contentBuilder: contentBuilder,
+            onPaneRemoved: (_) {},
+            onPaneTypeChanged: (_, _) {},
+          ),
         ),
       ),
     ),
@@ -91,6 +96,70 @@ void main() {
       HelpIds.paneBoundary,
     );
     await hover(find.text('Close').last, HelpIds.paneBoundary);
+  });
+  testWidgets('enlarged pane menus and dropdowns have 56-pixel targets', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host(enlarged: true));
+
+    await tester.tap(find.byKey(const ValueKey('pane-mode-0')));
+    await tester.pumpAndSettle();
+    final dropdownItem = find.ancestor(
+      of: find.text('Diagnostics').last,
+      matching: find.byType(DropdownMenuItem<PaneKind>),
+    );
+    expect(tester.getSize(dropdownItem).height, greaterThanOrEqualTo(56));
+    await tester.tap(find.text('Diagnostics').last);
+    await tester.pumpAndSettle();
+
+    final splitMenu = find.byKey(const ValueKey('split-menu-0'));
+    await tester.tap(splitMenu);
+    await tester.pumpAndSettle();
+    final splitItem = find.ancestor(
+      of: find.text('Side by side'),
+      matching: find.byType(PopupMenuItem<Axis>),
+    );
+    expect(tester.getSize(splitItem).height, greaterThanOrEqualTo(56));
+    await tester.tap(find.text('Side by side'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .getSize(find.bySemanticsLabel('Resize pane boundary').first)
+          .height,
+      greaterThanOrEqualTo(56),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Top and bottom'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .getSize(find.bySemanticsLabel('Resize pane boundary').first)
+          .height,
+      greaterThanOrEqualTo(56),
+    );
+  });
+  testWidgets('compact pane actions respect enlarged target size', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host(enlarged: true));
+    for (var split = 0; split < 3; split++) {
+      await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Side by side'));
+      await tester.pumpAndSettle();
+    }
+
+    final compactMenu = find.byKey(const ValueKey('pane-actions-0'));
+    expect(compactMenu, findsOneWidget);
+    await tester.tap(compactMenu);
+    await tester.pumpAndSettle();
+    final action = find.ancestor(
+      of: find.text('Split side-by-side'),
+      matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
+    );
+    expect(tester.getSize(action).height, greaterThanOrEqualTo(56));
   });
   testWidgets('selected pane mode is visible and replaces its content', (
     tester,
@@ -385,5 +454,54 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+  testWidgets('Manual navigation exposes help and 56-pixel targets', (
+    tester,
+  ) async {
+    final helpState = HelpState();
+    final paneSystemKey = GlobalKey<PaneSystemState>();
+    final pointer = TestPointer(43, PointerDeviceKind.mouse);
+    addTearDown(helpState.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TouchTargetSettings(
+            enlarged: true,
+            child: HelpScope(
+              helpState: helpState,
+              child: SizedBox.expand(
+                child: PaneSystem(
+                  key: paneSystemKey,
+                  contentBuilder: _manualContent,
+                  onPaneRemoved: (_) {},
+                  onPaneTypeChanged: (_, _) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    paneSystemKey.currentState!.openManual(HelpId.openDocument);
+    await tester.pumpAndSettle();
+
+    final section = find.byKey(const ValueKey('manual-section-Documents-true'));
+    final sectionHeader = find
+        .descendant(of: section, matching: find.byType(ListTile))
+        .first;
+    final articleLink = find.byKey(const ValueKey('manual-item-openDocument'));
+    expect(tester.getSize(sectionHeader).height, greaterThanOrEqualTo(56));
+    expect(tester.getSize(articleLink).height, greaterThanOrEqualTo(56));
+
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(find.text('Documents'))),
+    );
+    await tester.pump();
+    expect(helpState.activeTopic, HelpIds.manualNavigation);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(articleLink)),
+    );
+    await tester.pump();
+    expect(helpState.activeTopic, HelpId.openDocument);
   });
 }
