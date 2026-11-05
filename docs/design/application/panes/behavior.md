@@ -4,12 +4,13 @@ Behavior of the docked pane layout, as observed by the user. Notation: [EARS+](.
 
 ## Layout
 
-- **PNT-PAN-001** The Pane System shall support side-by-side and top-and-bottom splits.
+- **PNT-PAN-001** The Pane System shall be a Binary Space Partition tiling of panes.
   Source: [pane-system](pane-system.md).
 - **PNT-PAN-002** The Pane System shall provide a draggable divider for each split.
   Source: [pane-system](pane-system.md).
 - **PNT-PAN-003** WHEN the user drags a divider, the Pane System shall resize only the two panes adjacent to that divider.
   Source: [pane-system](pane-system.md).
+- **PNT-PAN-009** WHEN the user drags the corner between any panes, The Pane System shall resize all necessary panes accordingly.
 
 ## Content Selection
 

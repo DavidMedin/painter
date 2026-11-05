@@ -2,9 +2,6 @@
 
 Design for the nested split-pane layout that hosts all Painter content. Observable behavior is in [behavior](behavior.md). Notation: [EARS+](../README.md#requirement-notation-ears).
 
-## Status
-
-Accepted and implemented. Combines the former ADR 0010 (pane system) and the pane parts of ADR 0008 (workspace selector). Supersedes the earlier floating-window diagnostics presentation and the workspace selector that replaced the Canvas.
 
 ## Context
 
@@ -14,9 +11,8 @@ Painter needs modular panes whose content is chosen from a control at each pane'
 
 ### Structure
 
-- **PNT-A0010-01** The `PaneSystem` (in `lib/ui/pane_system.dart`) shall own pane identities, content kinds, a binary split tree, focus, and dividers.
+- **PNT-A0010-01** The `PaneSystem` (in `lib/ui/pane_system.dart`) shall own pane identities, content kinds, a binary space partition tree, focus, and dividers.
 - **PNT-ARC-030** The `PaneSystem` shall host the Canvas, Diagnostics, Settings, Manual, and Log pane modes in a nested binary split tree.
-- **PNT-A0010-02** Each split shall choose side-by-side or top-and-bottom and keep independent child weights.
 - **PNT-A0010-21** The Pane System shall keep pane layout state runtime-only and shall leave the document model and saved-document format unchanged.
 
 ### Dividers
@@ -24,13 +20,18 @@ Painter needs modular panes whose content is chosen from a control at each pane'
 - **PNT-A0010-03** Each split shall show a visibly marked 12-logical-pixel handle that resizes only that split's children.
 - **PNT-A0010-04** WHILE the available extent is smaller than the handle, the handle shall clamp to the split extent.
 - **PNT-A0010-05** WHEN the user right-clicks a handle, the Pane System shall offer split and close actions for the panes next to it.
+- **PNT-PAN-009** WHEN the user drags the corner between any panes, The Pane System shall resize all necessary panes accordingly.
+- **PNT-PAN-003** WHEN the user drags a divider, the Pane System shall resize only the two panes adjacent to that divider.
 
 ### Pane chrome
 
-- **PNT-A0010-06** Each pane shall have a visibly emphasized top-left content selector and a Split menu offering both directions.
-- **PNT-A0010-07** WHILE another pane remains, each pane shall offer a Close action.
+
+- **PNT-CHROME-1** The Pane System shall have a menu bar at the top of every pane.
+- **PNT-CHROME-2** A Pane's Menu Bar shall have the pane's mode selector on the far left.
+- **PNT-CHROME-3** A Pane's Menu Bar shall have a 'pane close' action on the far right.
 - **PNT-A0010-13** WHEN the user closes a leaf, the Pane System shall collapse the leaf's parent into the sibling.
 - **PNT-A0010-08** The Pane System shall draw focused borders 2 logical pixels wide in the primary color and inactive borders in `outlineVariant`.
+- **PNT-A0010-081** The Pane System shall focus whichever pane the user's cursor is hovering over.
 - **PNT-A0010-09** The Pane System shall draw pane content on the active theme surface, while Canvas paper remains fixed white.
 - **PNT-A0010-10** WHILE a pane header is 180 logical pixels wide or wider, the header shall use labeled actions.
 - **PNT-A0010-11** WHILE a pane header is from 48 to 180 logical pixels wide, the header shall use a compact action menu.
@@ -53,7 +54,6 @@ Retired requirement IDs for this document are recorded in the [retired ID regist
 
 ## Consequences
 
-- Canvas and Diagnostics can be visible at the same time without overlapping, and users can resize or close a pane while at least one pane remains.
 - Splits can be nested on either axis. Pane sizes and layout are not persisted.
 - The pane layout does not change the document model or file workflow.
 - Pane selectors, compact actions, split menus, divider menus, and dropdown
