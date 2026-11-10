@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "context_management": {
+    "schemaVersion": 1,
+    "contextManagementVersion": 1,
+    "session": {
+      "id": "01a1c699-cbdf-72d0-ac3b-41c145ab525d",
+      "file": "/Users/medindj1/.omp/agent/sessions/-small-projects-painter/2026-11-10T17-55-30-399Z_01a1c699-cbdf-72d0-ac3b-41c145ab525d.jsonl",
+      "generation": 1,
+      "cwd": "/Users/medindj1/small-projects/painter",
+      "provider": "Opal",
+      "model": "MiniMaxAI/MiniMax-M2.5",
+      "thinkingLevel": "high"
+    },
+    "usage": {
+      "tokens": 39785,
+      "contextWindow": 204800,
+      "percent": 19.42626953125,
+      "timestamp": "2026-11-10T19:01:49.382Z",
+      "source": "context"
+    },
+    "compactions": [],
+    "tasks": [],
+    "autonomy": {
+      "version": 1,
+      "mode": "paused",
+      "approval": {
+        "approved": false,
+        "marker": null,
+        "at": null
+      },
+      "nextStep": null,
+      "continuation": {
+        "token": null,
+        "attempt": 0,
+        "maxAttempts": 1,
+        "status": "pending",
+        "claimedAt": null
+      },
+      "lastReason": null,
+      "compaction": {
+        "pending": false,
+        "reason": null,
+        "requestedAt": null
+      }
+    },
+    "scheduler": {
+      "configuredConcurrency": 2,
+      "activeConcurrency": 0,
+      "queue": [],
+      "backoff": {
+        "attempts": 0,
+        "nextRetryAt": null
+      },
+      "lastCapacityEvent": null
+    },
+    "checkpoint": {
+      "phase": null,
+      "step": null,
+      "detail": "",
+      "updatedAt": "2026-11-10T17:55:30.798Z"
+    },
+    "recovery": {
+      "staleRunningTasks": [],
+      "quarantinedState": null,
+      "lastError": "context_management is not an object"
+    }
+  }
+}
