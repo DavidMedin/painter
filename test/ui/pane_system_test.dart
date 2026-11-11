@@ -12,6 +12,7 @@ import 'package:painter/help/manual_catalog.dart';
 import 'package:painter/help/manual_pane.dart';
 import 'package:painter/ui/touch_target_settings.dart';
 import 'package:painter/ui/pane_system.dart';
+import 'package:painter/ui/painter_action_button.dart';
 
 Widget _content(BuildContext context, PaneDescriptor pane) =>
     Center(child: Text('${pane.kind.name}-${pane.id}'));
@@ -270,6 +271,10 @@ void main() {
     await splitFirstPane();
     final compactMenu = find.byKey(const ValueKey('pane-actions-0'));
     expect(compactMenu, findsOneWidget);
+    expect(
+      tester.getTopRight(find.byKey(const ValueKey('pane-close-0'))).dx,
+      closeTo(tester.getTopRight(find.byKey(const ValueKey('pane-0'))).dx, 1),
+    );
     await tester.tap(compactMenu);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Settings').last);
@@ -371,7 +376,15 @@ void main() {
     await tester.tap(find.text('Close').last);
     await tester.pumpAndSettle();
     expect(find.text('canvas-0'), findsOneWidget);
-    expect(find.text('Close'), findsNothing);
+    final close = find.byKey(const ValueKey('pane-close-0'));
+    expect(close, findsOneWidget);
+    expect(tester.widget<PainterActionButton>(close).onPressed, isNull);
+    expect(
+      tester.getTopRight(close).dx,
+      greaterThan(
+        tester.getTopRight(find.byKey(const ValueKey('split-menu-0'))).dx,
+      ),
+    );
   });
   testWidgets('Manual opens beside the widest pane and reuses its page', (
     tester,

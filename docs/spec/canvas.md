@@ -10,6 +10,9 @@ CNVS-1 - The system shall allow the canvas to be infinitely sized.
 CNVS-2 - The system shall allow the canvas to be finitely sized.
 CNVS-3 - The system shall allow the user to pan,rotate,and scroll their view of the canvas within a pane.
 CNVS-4 - Each canvas shows some view of a Canvas within the currently active document.
+CNVS-5 - Retired.
+CNVS-6 - The system shall treat the View of a canvas as the Per-mode state of its Canvas Pane.
 ## Acceptance Examples
 
 ## Open Questions
+None.

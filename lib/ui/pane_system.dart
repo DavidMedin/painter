@@ -20,9 +20,10 @@
 // parent into its sibling. F3 creates Diagnostics beside Canvas; if
 // Diagnostics is the sole pane, F3 changes it to Canvas. F1 opens the hovered
 // or focused article in an existing Manual pane, or inserts Manual beside the
-// widest pane. Each pane's top bar selects its content mode. Boundary menus
-// add Canvas panes or delete the adjacent pane, and the final-pane empty state
-// offers an Open Canvas Pane action. Pane layout and widths are runtime-only.
+// widest pane. Each pane's top bar has the mode selector at the far left and a
+// Close button at the far right; Close is disabled on the final pane, which
+// cannot be closed. Boundary menus add Canvas panes or delete the adjacent
+// pane. Pane layout and widths are runtime-only.
 // The owner builds content from PaneDescriptor and owns content-specific state;
 // this widget knows nothing about documents or drawing.
 
@@ -356,7 +357,13 @@ class PaneSystemState extends State<PaneSystem> {
           builder: (context, constraints) {
             if (constraints.maxWidth < 48) return const SizedBox.expand();
             if (constraints.maxWidth < 180) {
-              return _buildCompactHeader(context, pane, height, scheme);
+              return _buildCompactHeader(
+                context,
+                pane,
+                height,
+                scheme,
+                constraints.maxWidth,
+              );
             }
             return Row(
               children: [
@@ -480,19 +487,18 @@ class PaneSystemState extends State<PaneSystem> {
                     ),
                   ),
                 ),
-                if (paneCount > 1) ...[
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: PainterActionButton(
-                      icon: Icons.close,
-                      label: 'Close',
-                      topic: HelpIds.paneBoundary,
-                      onPressed: () => _closePane(pane.id),
-                      minimumHeight: height,
-                    ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: PainterActionButton(
+                    key: ValueKey('pane-close-${pane.id}'),
+                    icon: Icons.close,
+                    label: 'Close',
+                    topic: HelpIds.paneBoundary,
+                    onPressed: paneCount > 1 ? () => _closePane(pane.id) : null,
+                    minimumHeight: height,
                   ),
-                  const SizedBox(width: 4),
-                ],
+                ),
+                const SizedBox(width: 4),
               ],
             );
           },
@@ -501,72 +507,101 @@ class PaneSystemState extends State<PaneSystem> {
     );
   }
 
-  /// Keeps mode and split actions available when a pane is too narrow for labels.
+  /// Builds the narrow toolbar: a mode and split menu at the far left and an
+  /// icon-only close button at the far right, so PANE-5 and PANE-7 still hold
+  /// when the labelled controls do not fit.
   Widget _buildCompactHeader(
     BuildContext context,
     _Pane pane,
     double height,
     ColorScheme scheme,
+    double width,
   ) {
-    return HelpTarget(
-      topic: HelpIds.paneBoundary,
-      child: PopupMenuButton<_CompactPaneAction>(
-        key: ValueKey('pane-actions-${pane.id}'),
-        onSelected: (action) {
-          switch (action) {
-            case _CompactPaneAction.canvas:
-              _setPaneKind(pane.id, PaneKind.canvas);
-            case _CompactPaneAction.diagnostics:
-              _setPaneKind(pane.id, PaneKind.diagnostics);
-            case _CompactPaneAction.settings:
-              _setPaneKind(pane.id, PaneKind.settings);
-            case _CompactPaneAction.manual:
-              _setPaneKind(pane.id, PaneKind.manual);
-            case _CompactPaneAction.log:
-              _setPaneKind(pane.id, PaneKind.log);
-            case _CompactPaneAction.splitSideBySide:
-              _splitPane(pane.id, axis: Axis.horizontal);
-            case _CompactPaneAction.splitTopAndBottom:
-              _splitPane(pane.id, axis: Axis.vertical);
-            case _CompactPaneAction.close:
-              _closePane(pane.id);
-          }
-        },
-        itemBuilder: (context) => [
-          for (final kind in PaneKind.values)
-            PopupMenuItem(
-              value: switch (kind) {
-                PaneKind.canvas => _CompactPaneAction.canvas,
-                PaneKind.diagnostics => _CompactPaneAction.diagnostics,
-                PaneKind.settings => _CompactPaneAction.settings,
-                PaneKind.manual => _CompactPaneAction.manual,
-                PaneKind.log => _CompactPaneAction.log,
-              },
-              height: height,
-              child: Text(kind.label),
+    final canClose = _panes.length > 1;
+    final closeColor = canClose
+        ? scheme.primary
+        : Theme.of(context).disabledColor;
+    return Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: HelpTarget(
+              topic: HelpIds.paneBoundary,
+              child: PopupMenuButton<_CompactPaneAction>(
+                key: ValueKey('pane-actions-${pane.id}'),
+                onSelected: (action) {
+                  switch (action) {
+                    case _CompactPaneAction.canvas:
+                      _setPaneKind(pane.id, PaneKind.canvas);
+                    case _CompactPaneAction.diagnostics:
+                      _setPaneKind(pane.id, PaneKind.diagnostics);
+                    case _CompactPaneAction.settings:
+                      _setPaneKind(pane.id, PaneKind.settings);
+                    case _CompactPaneAction.manual:
+                      _setPaneKind(pane.id, PaneKind.manual);
+                    case _CompactPaneAction.log:
+                      _setPaneKind(pane.id, PaneKind.log);
+                    case _CompactPaneAction.splitSideBySide:
+                      _splitPane(pane.id, axis: Axis.horizontal);
+                    case _CompactPaneAction.splitTopAndBottom:
+                      _splitPane(pane.id, axis: Axis.vertical);
+                  }
+                },
+                itemBuilder: (context) => [
+                  for (final kind in PaneKind.values)
+                    PopupMenuItem(
+                      value: switch (kind) {
+                        PaneKind.canvas => _CompactPaneAction.canvas,
+                        PaneKind.diagnostics => _CompactPaneAction.diagnostics,
+                        PaneKind.settings => _CompactPaneAction.settings,
+                        PaneKind.manual => _CompactPaneAction.manual,
+                        PaneKind.log => _CompactPaneAction.log,
+                      },
+                      height: height,
+                      child: Text(kind.label),
+                    ),
+                  PopupMenuItem(
+                    value: _CompactPaneAction.splitSideBySide,
+                    height: height,
+                    child: Text('Split side-by-side'),
+                  ),
+                  PopupMenuItem(
+                    value: _CompactPaneAction.splitTopAndBottom,
+                    height: height,
+                    child: Text('Split top-and-bottom'),
+                  ),
+                ],
+                child: SizedBox(
+                  height: height,
+                  child: Center(
+                    child: Icon(pane.kind.icon, color: scheme.primary),
+                  ),
+                ),
+              ),
             ),
-          PopupMenuItem(
-            value: _CompactPaneAction.splitSideBySide,
-            height: height,
-            child: Text('Split side-by-side'),
           ),
-          PopupMenuItem(
-            value: _CompactPaneAction.splitTopAndBottom,
-            height: height,
-            child: Text('Split top-and-bottom'),
-          ),
-          if (_panes.length > 1)
-            PopupMenuItem(
-              value: _CompactPaneAction.close,
-              height: height,
-              child: Text('Close pane'),
-            ),
-        ],
-        child: SizedBox(
-          height: height,
-          child: Center(child: Icon(pane.kind.icon, color: scheme.primary)),
         ),
-      ),
+        HelpTarget(
+          topic: HelpIds.paneBoundary,
+          child: Semantics(
+            button: true,
+            enabled: canClose,
+            label: 'Close pane',
+            onTap: canClose ? () => _closePane(pane.id) : null,
+            excludeSemantics: true,
+            child: InkWell(
+              key: ValueKey('pane-close-${pane.id}'),
+              onTap: canClose ? () => _closePane(pane.id) : null,
+              child: SizedBox(
+                width: math.min(height, width / 2),
+                height: height,
+                child: Center(child: Icon(Icons.close, color: closeColor)),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -780,5 +815,4 @@ enum _CompactPaneAction {
   log,
   splitSideBySide,
   splitTopAndBottom,
-  close,
 }

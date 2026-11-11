@@ -1,8 +1,8 @@
-# 003. Pencil Stroke Rendering as Gaussian Splats
+# 005. Pencil Stroke Rendering as Gaussian Splats
 
 Design for how a stroke becomes pencil-like marks. 
 ## Status
-Status: accepted (supersedes: 005; superseded by: none)
+Status: accepted (supersedes: 003; superseded by: none)
 Date: 2026-11-10
 Relates to: 
 

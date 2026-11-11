@@ -1,10 +1,10 @@
-# 005. Vector Canvas, Input, and Viewports
+# 003. Vector Canvas, Input, and Viewports
 
 Design for how the Canvas stores marks, maps pointer and trackpad input, and separates the document from each pane's view.
 
 ## Status
 
-Status: accepted (supersedes: none; superseded by: 003)
+Status: superseded (supersedes: none; superseded by: 005, 006)
 Date: 2026-11-10
 Relates to:
 
