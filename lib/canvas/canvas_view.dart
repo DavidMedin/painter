@@ -1,15 +1,15 @@
 // What: `CanvasView` maps pointer events through a pane-owned viewport and
 //   `_CanvasPainter` draws the shared document through a `TiledRenderer`.
-// Why: Input handling and painting stay separate from document storage and
-//   the tile pipeline. Each view owns its viewport and renderer; all views
-//   share the document controller.
-//
 // Why: Input handling and painting live here, apart from the state model
-// (canvas_controller.dart) and the tile pipeline (tiled_renderer.dart,
-// tile_cache.dart). The widget owns no document state; it is the only place
-// that knows which button or gesture means "draw", "pan", "zoom" or "rotate",
-// so changing controls (design/canvas/vector-canvas.md,
-// design/canvas/vector-canvas.md) never touches the model or the renderer.
+//   (canvas_controller.dart, canvas_viewport.dart) and the tile pipeline
+//   (tiled_renderer.dart, tile_cache.dart). The widget owns no document
+//   state; it is the only place that knows which button or gesture means
+//   "draw", "pan", "zoom" or "rotate", so changing controls
+//   (docs/decisions/003-vector-canvas.md) never touches the model or the
+//   renderer. Each view owns its viewport and renderer; all views share the
+//   document controller.
+// Coupled to: canvas_viewport.dart (the mapping `_CanvasPainter` applies),
+//   canvas_controller.dart, tiled_renderer.dart, ../debug/tile_overlay.dart.
 
 import 'dart:math' as math;
 
@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import '../debug/canvas_debug_options.dart';
 import '../debug/tile_overlay.dart';
 import 'canvas_controller.dart';
+import 'canvas_viewport.dart';
 import '../help/contextual_help.dart';
 import '../settings/painter_settings.dart';
 import 'tile_grid.dart';
@@ -62,13 +63,15 @@ import 'tiled_renderer.dart';
 //
 // Coordinate spaces: event.localPosition is in screen (widget-local) space.
 // Strokes are stored in document space, so draw events go through
-// `CanvasViewportController.toDocument` (which needs the viewport size, hence
-// `_viewportSize`). Pan is in screen pixels. Zoom and rotate use screen-space
-// anchors and the viewport adjusts pan to keep the anchored document point
-// fixed. `_CanvasPainter.paint` applies the forward mapping to the canvas
-// (pan, then centre, rotate, scale) and must stay in sync with
-// `CanvasViewportController.toScreen`/`toDocument`; both rotate and scale about
-// the viewport centre.
+// `CanvasViewportController.toDocument`. Every viewport conversion and
+// interaction takes the pane size (`_viewportSize`), because the view is a
+// center, an extent across the pane's shorter side and a rotation
+// (docs/decisions/011-relative-canvas-view.md). Pan deltas are in screen
+// pixels. Zoom and rotate use screen-space anchors and the viewport moves its
+// center to keep the anchored document point fixed. `_CanvasPainter.paint`
+// applies the forward mapping to the canvas (pane centre, rotate, scale by
+// the pixel zoom, minus the view center) and must stay in sync with
+// `CanvasViewportController.toScreen`/`toDocument`.
 //
 // Painting: the painter repaints when the shared document, this pane's
 // viewport, tile cache, or debug options change. See tile_cache.dart for the
@@ -92,7 +95,7 @@ class CanvasView extends StatefulWidget {
   /// Shared document and active-stroke state.
   final CanvasController controller;
 
-  /// Pan, zoom, and rotation state exclusive to this Canvas pane.
+  /// Center, extent, and rotation of the view exclusive to this Canvas pane.
   final CanvasViewportController viewport;
 
   /// When set, the canvas draws the overlays these options enable.
@@ -122,8 +125,8 @@ class _CanvasViewState extends State<CanvasView> {
   late final bool _ownsRenderer = widget.renderer == null;
 
   /// Size of the painting surface, read from the `Listener`'s render box via
-  /// [_surfaceKey]. Needed because this viewport's transforms are about the
-  /// viewport centre. `Size.zero` before the first layout.
+  /// [_surfaceKey]. Needed because the pixel zoom and the rotation centre
+  /// depend on the pane size. `Size.zero` before the first layout.
   Size get _viewportSize {
     final renderObject = _surfaceKey.currentContext?.findRenderObject();
     return renderObject is RenderBox ? renderObject.size : Size.zero;
@@ -178,7 +181,7 @@ class _CanvasViewState extends State<CanvasView> {
           _weightFor(event),
         );
       case _Interaction.pan:
-        widget.viewport.panBy(delta);
+        widget.viewport.panBy(delta, _viewportSize);
       case _Interaction.rotate:
         widget.viewport.rotateAt(
           event.localPosition,
@@ -237,11 +240,11 @@ class _CanvasViewState extends State<CanvasView> {
     final gesture = _trackpadGesture;
     if (gesture == null) return;
 
+    final viewportSize = _viewportSize;
     if (event.panDelta != Offset.zero) {
-      widget.viewport.panBy(event.panDelta);
+      widget.viewport.panBy(event.panDelta, viewportSize);
     }
 
-    final viewportSize = _viewportSize;
     if (event.scale != gesture.lastScale) {
       widget.viewport.zoomAt(
         gesture.focalPoint,
@@ -370,13 +373,18 @@ class _CanvasPainter extends CustomPainter {
     canvas.save();
     canvas.clipRect(Offset.zero & size);
     canvas.drawColor(CanvasView.paperColor, BlendMode.src);
-    final center = Offset(size.width / 2, size.height / 2);
-    // The transform matches CanvasViewportController.toScreen: translate by
-    // pan, then rotate and scale about this pane's viewport centre.
-    canvas.translate(viewport.pan.dx, viewport.pan.dy);
-    canvas.translate(center.dx, center.dy);
+    final zoom = viewport.zoomFor(size);
+    if (zoom == 0) {
+      // An empty pane has no view mapping and shows nothing.
+      canvas.restore();
+      return;
+    }
+    final center = viewport.center;
+    // The transform matches CanvasViewportController.toScreen: the view
+    // center goes to the pane centre, rotated and scaled by the pixel zoom.
+    canvas.translate(size.width / 2, size.height / 2);
     canvas.rotate(viewport.rotation);
-    canvas.scale(viewport.zoom);
+    canvas.scale(zoom);
     canvas.translate(-center.dx, -center.dy);
     // `visible` maps all four corners, so its document-space bounds remain
     // exact under rotation; zoom selects the renderer's tile level of detail.
@@ -384,11 +392,12 @@ class _CanvasPainter extends CustomPainter {
       canvas,
       document: controller.document,
       active: controller.activePoints,
+      activeId: controller.activeStrokeId,
       visible: TileGrid.visibleDocumentRect(
         size,
         (screen) => viewport.toDocument(screen, size),
       ),
-      pixelsPerUnit: viewport.zoom * devicePixelRatio,
+      pixelsPerUnit: zoom * devicePixelRatio,
     );
     final options = debugOptions;
     if (options != null) {
@@ -396,7 +405,7 @@ class _CanvasPainter extends CustomPainter {
         canvas,
         frame: renderer.frame,
         options: options,
-        zoom: viewport.zoom,
+        zoom: zoom,
         colorScheme: colorScheme,
         themeColors: themeColors,
       );

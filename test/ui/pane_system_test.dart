@@ -1,21 +1,26 @@
 // What: Widget tests for PaneSystem: mode selection, the frame-edge toolbars
-//   (add, join, swap), disabled states, rotation, splitter drags and the
-//   100 px clamp, handle placement, minimum-size rendering, and help ids.
-// Why: PaneSystem turns Workspace state into the chrome that docs/spec/panes.md
-//   describes. These tests protect what a user can see and do: where a new
-//   pane appears, when a button is disabled, and that dragging never pushes a
-//   pane below 100 px.
+//   (add, join, swap), disabled states, rotation, splitter drags and the 10%
+//   clamp, handle placement, minimum-size rendering, help ids, and redraws
+//   after remote edits.
+// Why: PaneSystem turns the Workspace's projection into the chrome that
+//   docs/spec/panes.md describes. These tests protect what a user can see
+//   and do: where a new pane appears, when a button is disabled (PANE-14,
+//   PANE-25, PANE-27), and that dragging never pushes a pane below 10% of the
+//   workspace (PANE-26).
 // Covers: lib/ui/pane_system.dart (with lib/workspace/workspace.dart as its
-//   model). Model rules are tested in test/workspace/.
+//   model over a real Automerge document). Model rules are tested in
+//   test/workspace/.
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/help/contextual_help.dart';
 import 'package:painter/ui/pane_system.dart';
+import 'package:painter/workspace/layout_tree.dart';
 import 'package:painter/workspace/pane_kind.dart';
-import 'package:painter/workspace/pane_layout.dart';
 import 'package:painter/workspace/workspace.dart';
+
+import '../workspace/workspace_test_support.dart';
 
 Widget _content(BuildContext context, PaneDescriptor pane) =>
     Center(child: Text('${pane.kind.name}-${pane.id}'));
@@ -30,8 +35,19 @@ Widget _host(Workspace workspace, {HelpState? helpState}) {
   return MaterialApp(home: Scaffold(body: system));
 }
 
-Finder _button(PaneEdge edge, String action, int paneId) =>
-    find.byKey(ValueKey('frame-${edge.name}-$action-$paneId'));
+/// A frame button of the pane at [index] in tree order.
+Finder _button(PaneEdge edge, String action, int index) =>
+    find.byKey(ValueKey('frame-${edge.name}-$action-$index'));
+
+/// The mode dropdown of the pane at [index] in tree order.
+Finder _mode(int index) => find.byKey(ValueKey('pane-mode-$index'));
+
+/// The frame of pane [id].
+Finder _frame(String id) => find.byKey(ValueKey('pane-$id'));
+
+/// The splitter [splitter] of the shown layout.
+Finder _splitter(LayoutSplitter splitter) =>
+    find.byKey(ValueKey('splitter-${splitter.key}'));
 
 bool _enabled(WidgetTester tester, Finder button) {
   final ink = find.descendant(of: button, matching: find.byType(InkWell));
@@ -43,15 +59,32 @@ Future<void> _press(WidgetTester tester, Finder button) async {
   await tester.pumpAndSettle();
 }
 
-/// Four panes in a 2x2 grid: 0 top left, 1 top right, 2 bottom left, 3 bottom
-/// right.
-Future<Workspace> _grid(WidgetTester tester) async {
-  final workspace = Workspace();
-  addTearDown(workspace.dispose);
+/// A workspace shown in an 800x600 PaneSystem.
+Future<Workspace> _shown(WidgetTester tester) async {
+  final workspace = openWorkspace();
   await tester.pumpWidget(_host(workspace));
+  return workspace;
+}
+
+/// Four panes in a 2x2 grid built by splitting the left and right halves
+/// separately: tree order top left, bottom left, top right, bottom right.
+/// One vertical splitter runs the full height.
+Future<Workspace> _columnsGrid(WidgetTester tester) async {
+  final workspace = await _shown(tester);
   await _press(tester, _button(PaneEdge.right, 'add', 0));
   await _press(tester, _button(PaneEdge.bottom, 'add', 0));
-  await _press(tester, _button(PaneEdge.bottom, 'add', 1));
+  await _press(tester, _button(PaneEdge.bottom, 'add', 2));
+  return workspace;
+}
+
+/// Four panes in a 2x2 grid built by splitting the top and bottom halves
+/// separately: tree order top left, top right, bottom left, bottom right.
+/// Each half has its own vertical splitter.
+Future<Workspace> _rowsGrid(WidgetTester tester) async {
+  final workspace = await _shown(tester);
+  await _press(tester, _button(PaneEdge.bottom, 'add', 0));
+  await _press(tester, _button(PaneEdge.right, 'add', 0));
+  await _press(tester, _button(PaneEdge.right, 'add', 2));
   return workspace;
 }
 
@@ -59,9 +92,8 @@ void main() {
   testWidgets('pane controls expose their contextual help', (tester) async {
     final helpState = HelpState();
     final pointer = TestPointer(42, PointerDeviceKind.mouse);
-    final workspace = Workspace();
+    final workspace = openWorkspace();
     addTearDown(helpState.dispose);
-    addTearDown(workspace.dispose);
     await tester.pumpWidget(_host(workspace, helpState: helpState));
 
     Future<void> hover(Finder target, HelpId expected) async {
@@ -70,7 +102,7 @@ void main() {
       expect(helpState.activeTopic, expected);
     }
 
-    await hover(find.byKey(const ValueKey('pane-mode-0')), HelpIds.paneType);
+    await hover(_mode(0), HelpIds.paneType);
     await hover(_button(PaneEdge.right, 'add', 0), HelpIds.paneBoundary);
     await _press(tester, _button(PaneEdge.right, 'add', 0));
     await hover(
@@ -82,34 +114,33 @@ void main() {
   testWidgets('the mode dropdown replaces the content of its pane only', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    final workspace = await _shown(tester);
     await _press(tester, _button(PaneEdge.right, 'add', 0));
+    final [left, right] = workspace.paneIds;
 
-    await _press(tester, find.byKey(const ValueKey('pane-mode-1')));
+    await _press(tester, _mode(1));
     await _press(tester, find.text('Diagnostics').last);
 
-    expect(find.text('canvas-0'), findsOneWidget);
-    expect(find.text('diagnostics-1'), findsOneWidget);
-    expect(find.text('canvas-1'), findsNothing);
-    expect(workspace.kindOf(1), PaneKind.diagnostics);
+    expect(find.text('canvas-$left'), findsOneWidget);
+    expect(find.text('diagnostics-$right'), findsOneWidget);
+    expect(find.text('canvas-$right'), findsNothing);
+    expect(workspace.kindOf(right), PaneKind.diagnostics);
   });
 
   for (final edge in PaneEdge.values) {
     testWidgets('add on the ${edge.name} edge puts the new pane there', (
       tester,
     ) async {
-      final workspace = Workspace();
-      addTearDown(workspace.dispose);
-      await tester.pumpWidget(_host(workspace));
-      final before = tester.getRect(find.byKey(const ValueKey('pane-0')));
+      final workspace = await _shown(tester);
+      final id = workspace.paneIds.single;
+      final before = tester.getRect(_frame(id));
 
       await _press(tester, _button(edge, 'add', 0));
 
-      final original = tester.getRect(find.byKey(const ValueKey('pane-0')));
-      final added = tester.getRect(find.byKey(const ValueKey('pane-1')));
-      expect(find.text('canvas-1'), findsOneWidget);
+      final addedId = workspace.paneIds.firstWhere((other) => other != id);
+      final original = tester.getRect(_frame(id));
+      final added = tester.getRect(_frame(addedId));
+      expect(find.text('canvas-$addedId'), findsOneWidget);
       switch (edge) {
         case PaneEdge.top:
           expect(added.bottom, lessThanOrEqualTo(original.top));
@@ -136,9 +167,7 @@ void main() {
   testWidgets('join and swap are disabled on edges without one neighbor', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    await _shown(tester);
     // A single pane borders only the workspace boundary.
     for (final edge in PaneEdge.values) {
       expect(_enabled(tester, _button(edge, 'join', 0)), isFalse);
@@ -147,7 +176,7 @@ void main() {
     }
 
     // Pane 0 on the left, panes 1 and 2 stacked on the right: pane 0's right
-    // edge is bordered by two panes.
+    // edge is bordered by two panes (PANE-14).
     await _press(tester, _button(PaneEdge.right, 'add', 0));
     await _press(tester, _button(PaneEdge.bottom, 'add', 1));
     expect(_enabled(tester, _button(PaneEdge.right, 'join', 0)), isFalse);
@@ -161,52 +190,83 @@ void main() {
   testWidgets('join absorbs the neighbor and keeps the pane mode', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    final workspace = await _shown(tester);
     await _press(tester, _button(PaneEdge.right, 'add', 0));
-    await _press(tester, find.byKey(const ValueKey('pane-mode-1')));
+    final [left, right] = workspace.paneIds;
+    await _press(tester, _mode(1));
     await _press(tester, find.text('Log').last);
 
     await _press(tester, _button(PaneEdge.right, 'join', 0));
 
-    expect(find.text('canvas-0'), findsOneWidget);
-    expect(find.text('log-1'), findsNothing);
-    expect(find.byKey(const ValueKey('pane-1')), findsNothing);
+    expect(find.text('canvas-$left'), findsOneWidget);
+    expect(find.text('log-$right'), findsNothing);
+    expect(_frame(right), findsNothing);
     expect(
-      tester.getSize(find.byKey(const ValueKey('pane-0'))),
+      tester.getSize(_frame(left)),
       tester.getSize(find.byType(PaneSystem)),
     );
     expect(find.bySemanticsLabel('Resize pane boundary'), findsNothing);
   });
 
+  testWidgets('joining aligned panes of different splits reshapes the tree '
+      '(PANE-25)', (tester) async {
+    final workspace = await _rowsGrid(tester);
+    final [topLeft, topRight, bottomLeft, bottomRight] = workspace.paneIds;
+    expect(_enabled(tester, _button(PaneEdge.bottom, 'join', 0)), isTrue);
+
+    await _press(tester, _button(PaneEdge.bottom, 'join', 0));
+
+    expect(workspace.paneIds, unorderedEquals([topLeft, topRight, bottomRight]));
+    expect(_frame(bottomLeft), findsNothing);
+    final left = tester.getRect(_frame(topLeft));
+    expect(left.top, tester.getRect(_frame(topRight)).top);
+    expect(left.bottom, tester.getRect(_frame(bottomRight)).bottom);
+  });
+
+  testWidgets('a moved splitter breaks the alignment of the other half', (
+    tester,
+  ) async {
+    final workspace = await _rowsGrid(tester);
+    final bottomSplitter = workspace.splitters.lastWhere(
+      (splitter) => splitter.vertical,
+    );
+    expect(_enabled(tester, _button(PaneEdge.bottom, 'swap', 0)), isTrue);
+
+    await tester.dragFrom(
+      tester.getCenter(_splitter(bottomSplitter)),
+      const Offset(100, 0),
+    );
+    await tester.pumpAndSettle();
+
+    // The top-left pane's bottom edge now borders two panes.
+    expect(_enabled(tester, _button(PaneEdge.bottom, 'join', 0)), isFalse);
+    expect(_enabled(tester, _button(PaneEdge.bottom, 'swap', 0)), isFalse);
+  });
+
   testWidgets('swap exchanges the content of two panes in place', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    final workspace = await _shown(tester);
     await _press(tester, _button(PaneEdge.right, 'add', 0));
-    await _press(tester, find.byKey(const ValueKey('pane-mode-1')));
+    final [left, right] = workspace.paneIds;
+    await _press(tester, _mode(1));
     await _press(tester, find.text('Settings').last);
-    final leftBefore = tester.getRect(find.byKey(const ValueKey('pane-0')));
+    final leftBefore = tester.getRect(_frame(left));
 
     await _press(tester, _button(PaneEdge.right, 'swap', 0));
 
-    expect(find.text('settings-0'), findsOneWidget);
-    expect(find.text('canvas-1'), findsOneWidget);
-    expect(tester.getRect(find.byKey(const ValueKey('pane-0'))), leftBefore);
+    expect(find.text('settings-$left'), findsOneWidget);
+    expect(find.text('canvas-$right'), findsOneWidget);
+    expect(tester.getRect(_frame(left)), leftBefore);
   });
 
-  testWidgets('add is disabled once a pane is too small to halve', (
+  testWidgets('add is disabled below 20% of the workspace (PANE-27)', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    final workspace = await _shown(tester);
+    final id = workspace.paneIds.single;
 
-    // 800 -> 400 -> 200 -> 100 px: the third split still leaves two 100 px
-    // halves, the fourth would not.
+    // Widths 100%, 50% and 25% may be halved; 12.5% may not.
     for (var i = 0; i < 3; i++) {
       expect(_enabled(tester, _button(PaneEdge.right, 'add', 0)), isTrue);
       await _press(tester, _button(PaneEdge.right, 'add', 0));
@@ -216,15 +276,13 @@ void main() {
     // The pane is still tall enough to split the other way.
     expect(_enabled(tester, _button(PaneEdge.top, 'add', 0)), isTrue);
     expect(tester.takeException(), isNull);
-    expect(workspace.layout.rect(0).width * 800, closeTo(100, 1e-6));
+    expect(workspace.rectOf(id).width, closeTo(0.125, 1e-9));
   });
 
   testWidgets('left and right toolbars are rotated, top and bottom are not', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    await _shown(tester);
 
     int? turns(PaneEdge edge) {
       final rotated = find.ancestor(
@@ -244,10 +302,8 @@ void main() {
   });
 
   testWidgets('toolbars lie along their own edge of the pane', (tester) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
-    final pane = tester.getRect(find.byKey(const ValueKey('pane-0')));
+    final workspace = await _shown(tester);
+    final pane = tester.getRect(_frame(workspace.paneIds.single));
 
     Offset at(PaneEdge edge) => tester.getCenter(_button(edge, 'join', 0));
     expect(at(PaneEdge.top).dy, lessThan(pane.top + 30));
@@ -259,49 +315,42 @@ void main() {
     expect(at(PaneEdge.left).dy, closeTo(pane.center.dy, 40));
   });
 
-  testWidgets('dragging a splitter resizes both panes and stops at 100 px', (
-    tester,
-  ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+  testWidgets('dragging a splitter resizes both panes and stops at 10% '
+      '(PANE-26)', (tester) async {
+    final workspace = await _shown(tester);
     await _press(tester, _button(PaneEdge.right, 'add', 0));
+    final [left, right] = workspace.paneIds;
     final splitter = find.bySemanticsLabel('Resize pane boundary');
-    final leftBefore = tester.getSize(find.byKey(const ValueKey('pane-0')));
-    final rightBefore = tester.getSize(find.byKey(const ValueKey('pane-1')));
+    final leftBefore = tester.getSize(_frame(left));
+    final rightBefore = tester.getSize(_frame(right));
 
     await tester.drag(splitter, const Offset(80, 0));
     await tester.pumpAndSettle();
     // Drag recognition swallows the first ~20 px, so compare the two panes
     // with each other rather than with the finger travel.
-    final grown =
-        tester.getSize(find.byKey(const ValueKey('pane-0'))).width -
-        leftBefore.width;
-    final shrunk =
-        rightBefore.width -
-        tester.getSize(find.byKey(const ValueKey('pane-1'))).width;
+    final grown = tester.getSize(_frame(left)).width - leftBefore.width;
+    final shrunk = rightBefore.width - tester.getSize(_frame(right)).width;
     expect(grown, greaterThan(40));
     expect(grown, closeTo(shrunk, 1));
 
-    // A drag far past the limit leaves the right pane its 100 px share.
+    // A drag far past the limit leaves the right pane 10% of the workspace.
     await tester.drag(splitter, const Offset(2000, 0));
     await tester.pumpAndSettle();
-    expect(workspace.layout.rect(1).width * 800, closeTo(100, 1e-6));
+    expect(workspace.rectOf(right).width, closeTo(0.1, 1e-9));
     expect(tester.takeException(), isNull);
 
     await tester.drag(splitter, const Offset(-2000, 0));
     await tester.pumpAndSettle();
-    expect(workspace.layout.rect(0).width * 800, closeTo(100, 1e-6));
+    expect(workspace.rectOf(left).width, closeTo(0.1, 1e-9));
   });
 
   testWidgets('several drag updates between frames all take effect', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    final workspace = await _shown(tester);
     await _press(tester, _button(PaneEdge.right, 'add', 0));
-    final before = workspace.layout.rect(0).width * 800;
+    final left = workspace.paneIds.first;
+    final before = workspace.rectOf(left).width * 800;
 
     final gesture = await tester.startGesture(
       tester.getCenter(find.bySemanticsLabel('Resize pane boundary')),
@@ -314,47 +363,49 @@ void main() {
 
     // Drag recognition swallows the first ~20 px; losing every update but the
     // last would leave at most 10 px.
-    final grown = workspace.layout.rect(0).width * 800 - before;
+    final grown = workspace.rectOf(left).width * 800 - before;
     expect(grown, greaterThan(25));
     expect(grown, lessThanOrEqualTo(50 + 1e-6));
   });
 
-  testWidgets('one drag moves every aligned border of a shared splitter', (
-    tester,
-  ) async {
-    final workspace = await _grid(tester);
-    final vertical = find.byKey(const ValueKey('splitter-v:0,2|1,3'));
-    expect(vertical, findsOneWidget);
+  testWidgets('one drag moves the whole boundary of a split', (tester) async {
+    final workspace = await _columnsGrid(tester);
+    final [topLeft, bottomLeft, topRight, bottomRight] = workspace.paneIds;
+    final vertical = workspace.splitters.singleWhere(
+      (splitter) => splitter.vertical,
+    );
+    expect(_splitter(vertical), findsOneWidget);
 
-    // Start away from the middle, where the horizontal splitter crosses.
+    // Start away from the middle, where the horizontal splitters meet it.
     await tester.dragFrom(
-      tester.getTopLeft(vertical) + const Offset(4, 100),
+      tester.getTopLeft(_splitter(vertical)) + const Offset(4, 100),
       const Offset(100, 0),
     );
     await tester.pumpAndSettle();
 
-    final topLeft = tester.getRect(find.byKey(const ValueKey('pane-0')));
-    final bottomLeft = tester.getRect(find.byKey(const ValueKey('pane-2')));
-    expect(topLeft.right, bottomLeft.right);
-    expect(topLeft.width, greaterThan(400 - 4 + 50));
+    final upper = tester.getRect(_frame(topLeft));
+    final lower = tester.getRect(_frame(bottomLeft));
+    expect(upper.right, lower.right);
+    expect(upper.width, greaterThan(400 - 4 + 50));
     // The panes stay joinable: their borders are still exactly aligned.
     expect(_enabled(tester, _button(PaneEdge.right, 'join', 0)), isTrue);
-    expect(_enabled(tester, _button(PaneEdge.right, 'join', 2)), isTrue);
-    expect(workspace.layout.rect(1).left, workspace.layout.rect(3).left);
+    expect(_enabled(tester, _button(PaneEdge.right, 'join', 1)), isTrue);
+    expect(workspace.rectOf(topRight).left, workspace.rectOf(bottomRight).left);
   });
 
   testWidgets('a splitter handle sits at the center of its splitter', (
     tester,
   ) async {
-    await _grid(tester);
-    for (final key in ['splitter-v:0,2|1,3', 'splitter-h:0,1|2,3']) {
-      final splitter = find.byKey(ValueKey(key));
+    final workspace = await _columnsGrid(tester);
+    expect(workspace.splitters, hasLength(3));
+    for (final splitter in workspace.splitters) {
+      final finder = _splitter(splitter);
       final handle = find.descendant(
-        of: splitter,
+        of: finder,
         matching: find.byType(Container),
       );
       expect(handle, findsOneWidget);
-      final center = tester.getCenter(splitter);
+      final center = tester.getCenter(finder);
       final grip = tester.getCenter(handle);
       expect(grip.dx, closeTo(center.dx, 0.5));
       expect(grip.dy, closeTo(center.dy, 0.5));
@@ -364,10 +415,9 @@ void main() {
   testWidgets('pane frames do not overlap and leave no gap but splitters', (
     tester,
   ) async {
-    await _grid(tester);
+    final workspace = await _columnsGrid(tester);
     final rects = [
-      for (var id = 0; id < 4; id++)
-        tester.getRect(find.byKey(ValueKey('pane-$id'))),
+      for (final id in workspace.paneIds) tester.getRect(_frame(id)),
     ];
     for (var i = 0; i < rects.length; i++) {
       for (var j = i + 1; j < rects.length; j++) {
@@ -375,9 +425,11 @@ void main() {
         expect(overlap.width <= 0 || overlap.height <= 0, isTrue);
       }
     }
-    // Between the two columns lies exactly one 8 px splitter.
-    expect(rects[1].left - rects[0].right, closeTo(8, 1e-6));
-    expect(rects[3].top - rects[1].bottom, closeTo(8, 1e-6));
+    // Between the two columns and the two rows lies exactly one 8 px
+    // splitter.
+    final [topLeft, bottomLeft, topRight, _] = rects;
+    expect(topRight.left - topLeft.right, closeTo(8, 1e-6));
+    expect(bottomLeft.top - topLeft.bottom, closeTo(8, 1e-6));
   });
 
   testWidgets('panes at the minimum size and smaller build without errors', (
@@ -385,9 +437,7 @@ void main() {
   ) async {
     final originalSize = tester.view.physicalSize;
     addTearDown(() => tester.view.physicalSize = originalSize);
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    await _shown(tester);
     for (var i = 0; i < 3; i++) {
       await _press(tester, _button(PaneEdge.right, 'add', 0));
     }
@@ -404,25 +454,41 @@ void main() {
   testWidgets('the frame of the pane last pressed is highlighted', (
     tester,
   ) async {
-    final workspace = Workspace();
-    addTearDown(workspace.dispose);
-    await tester.pumpWidget(_host(workspace));
+    final workspace = await _shown(tester);
     await _press(tester, _button(PaneEdge.right, 'add', 0));
-    final primary = Theme.of(tester.element(find.byType(PaneSystem)))
-        .colorScheme
-        .primary;
+    final [left, right] = workspace.paneIds;
+    final primary = Theme.of(
+      tester.element(find.byType(PaneSystem)),
+    ).colorScheme.primary;
 
-    Color frame(int id) {
-      final listener = tester.widget<Listener>(
-        find.byKey(ValueKey('pane-$id')),
-      );
+    Color frame(String id) {
+      final listener = tester.widget<Listener>(_frame(id));
       final box = listener.child! as DecoratedBox;
       return ((box.decoration as BoxDecoration).border! as Border).top.color;
     }
 
-    await tester.tap(find.text('canvas-0'));
+    await tester.tap(find.text('canvas-$left'));
     await tester.pump();
-    expect(frame(0), primary);
-    expect(frame(1), isNot(primary));
+    expect(frame(left), primary);
+    expect(frame(right), isNot(primary));
+  });
+
+  testWidgets('edits of another Member are drawn when they arrive '
+      '(WKSP-33)', (tester) async {
+    final local = sessionWithDefaultWorkspace();
+    final remote = replicaOf(local);
+    final shown = openWorkspace(session: local);
+    final other = openWorkspace(session: remote);
+    await tester.pumpWidget(_host(shown));
+    final id = shown.paneIds.single;
+
+    final added = other.add(id, PaneEdge.bottom)!;
+    other.setKind(added, PaneKind.log);
+    syncAll([local, remote]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('canvas-$id'), findsOneWidget);
+    expect(find.text('log-$added'), findsOneWidget);
+    expect(find.bySemanticsLabel('Resize pane boundary'), findsOneWidget);
   });
 }

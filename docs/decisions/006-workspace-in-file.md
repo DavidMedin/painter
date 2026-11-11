@@ -1,6 +1,6 @@
 # 006. A document file stores its workspace in a separate section written only by an explicit Flash
 
-Status: accepted   (supersedes: 003; superseded by: none)
+Status: superseded   (supersedes: 003; superseded by: 009)
 Date: 2026-11-11
 Relates to: WKSP-1, WKSP-2, WKSP-3, WKSP-4, WKSP-22, WKSP-23, PANE-22
 

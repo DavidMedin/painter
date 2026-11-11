@@ -4,13 +4,8 @@ This document describes what about the current state of the project is not in co
 This document is not append-only, and should always be reevaluated by the human after changes have been made.
 Each non-compliance item shall be given a unique id, like NON-000, that may be referenced in plan.md
 This section of the document must not change. Everything after here may.
-Next id: NON-011
+Next id: NON-012
 ## Code
-
-### NON-001: Undo/Redo not implemented
-**Spec**: docs/spec/undo-redo.md (UNDO-1 through UNDO-6)
-**Status**: Not implemented
-**Details**: Decision 001-undo-redo.md was accepted but no implementation exists. No undo/redo commands, history stack, or redo functionality. Requirement EDIT-1 in nondestructive-editing.md also depends on this.
 
 ### NON-002: Tabs not implemented
 **Spec**: docs/spec/tabs.md
@@ -34,12 +29,12 @@ spec: docs/spec/panes.md
 status: non-compliant
 details: the current toolbar implementation is using an old spec that is not present in the repo.
 
-## Tests
+### NON-011: UNDO-6 memory-pressure warning not implemented
+**Spec**: docs/spec/undo-redo.md (UNDO-6)
+**Status**: Not implemented
+**Details**: Undo history (docs/decisions/012-undo-per-participant.md) holds stroke ids and removed stroke data in memory; nothing detects memory pressure or warns that an edit cannot be undone.
 
-### NON-005: No undo/redo tests
-**Spec**: docs/spec/undo-redo.md
-**Status**: Missing
-**Details**: No test files for undo/redo functionality.
+## Tests
 
 ### NON-006: No tab tests
 **Spec**: docs/spec/tabs.md

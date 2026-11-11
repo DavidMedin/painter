@@ -62,7 +62,7 @@ const _height = 40;
 
 /// Builds a [CanvasDocument] by driving a real [CanvasController] through
 /// beginStroke / extendStroke / endStroke for each point list, so strokes get
-/// the seeds (1-based index) the app assigns on commit. The controller is
+/// the ids, seeds and z order the app assigns on commit. The controller is
 /// disposed at test teardown; the returned document stays usable until then.
 CanvasDocument _documentOf(List<List<CanvasPoint>> strokes) {
   final controller = CanvasController();
@@ -101,6 +101,7 @@ Future<ByteData> _frame(
   TiledRenderer renderer,
   CanvasDocument document, {
   List<CanvasPoint> active = const [],
+  String? activeId,
   double pixelsPerUnit = 1,
   Rect visible = const Rect.fromLTWH(0, 0, _width * 1.0, _height * 1.0),
 }) async {
@@ -111,6 +112,7 @@ Future<ByteData> _frame(
     canvas,
     document: document,
     active: active,
+    activeId: activeId,
     visible: visible,
     pixelsPerUnit: pixelsPerUnit,
   );
@@ -130,16 +132,19 @@ Future<ByteData> _settled(
   TiledRenderer renderer,
   CanvasDocument document, {
   List<CanvasPoint> active = const [],
+  String? activeId,
 }) async {
-  var bytes = await _frame(renderer, document, active: active);
+  Future<ByteData> frame() =>
+      _frame(renderer, document, active: active, activeId: activeId);
+  var bytes = await frame();
   for (var i = 0; i < 200; i++) {
     if (renderer.cache.idle) {
       // One more paint so requests made by the previous frame are visible.
-      bytes = await _frame(renderer, document, active: active);
+      bytes = await frame();
       if (renderer.cache.idle) return bytes;
     }
     await Future<void>.delayed(const Duration(milliseconds: 10));
-    bytes = await _frame(renderer, document, active: active);
+    bytes = await frame();
   }
   fail('tile cache never went idle');
 }
@@ -211,12 +216,12 @@ Future<void> _verifyLateSplatIsIgnored({required bool replaceDocument}) async {
   cache.request(key);
   worker.completeWithSplats(0);
   await worker.waitForRequests(2);
-  expect(cache.splatsIfReady(0), isNull);
+  expect(cache.splatsIfReady(worker.strokes[0].id), isNull);
   expect(cache.counters.splatsGenerated, 0);
 
   final currentSplats = worker.completeWithSplats(1);
   await _waitForCacheIdle(cache);
-  expect(cache.splatsIfReady(0), same(currentSplats));
+  expect(cache.splatsIfReady(worker.strokes[1].id), same(currentSplats));
   expect(cache.peek(key), isNotNull);
 }
 
@@ -336,11 +341,12 @@ void main() {
       renderer,
       controller.document,
       active: controller.activePoints,
+      activeId: controller.activeStrokeId,
     );
     final tile = renderer.cache.tile(const TileKey(0, 0, 0))!;
 
     expect(renderer.frame.activeSplats, lessThan(maxLiveSplats));
-    expect(tile.appliedStrokes, controller.document.strokeCount);
+    expect(tile.appliedThrough, same(controller.document.strokes.last));
     expect(_red(bytes, 100, 20), lessThan(255));
   });
 
@@ -358,6 +364,7 @@ void main() {
       renderer,
       controller.document,
       active: controller.activePoints,
+      activeId: controller.activeStrokeId,
     );
     expect(_red(beforeRollover, 30, 20), lessThan(255));
 
@@ -370,6 +377,7 @@ void main() {
       renderer,
       controller.document,
       active: controller.activePoints,
+      activeId: controller.activeStrokeId,
     );
 
     expect(_red(duringTileUpdate, 30, 20), _red(beforeRollover, 30, 20));
@@ -377,6 +385,7 @@ void main() {
       renderer,
       controller.document,
       active: controller.activePoints,
+      activeId: controller.activeStrokeId,
     );
     expect(_red(afterTileUpdate, 30, 20), _red(beforeRollover, 30, 20));
   });
@@ -393,22 +402,26 @@ void main() {
     expect(light, lessThan(full));
   });
 
-  // This short stroke stays within one chunk. Its live stream and committed
-  // tile use the same nextSeed (CanvasStroke.seed,
-  // design/canvas/tile-cache.md), so the frames compare byte for byte.
+  // This short stroke stays within one chunk. Its live stream is seeded from
+  // the id it is committed under (CanvasController.activeStrokeId, and
+  // CanvasStroke.seed = strokeSeedOf(id)), so the frames compare byte for
+  // byte.
   test('committing a stroke does not change its grain', () async {
-    final points = [
-      const CanvasPoint(position: Offset(80, 20), weight: 1),
-      const CanvasPoint(position: Offset(120, 20), weight: 1),
-    ];
+    final controller = CanvasController();
+    addTearDown(controller.dispose);
     final renderer = _renderer();
 
+    controller
+      ..beginStroke(const Offset(80, 20), 1)
+      ..extendStroke(const Offset(120, 20), 1);
     final drawing = await _frame(
       renderer,
-      CanvasDocument.empty(),
-      active: points,
+      controller.document,
+      active: controller.activePoints,
+      activeId: controller.activeStrokeId,
     );
-    final committed = await _settled(renderer, _documentOf([points]));
+    controller.endStroke();
+    final committed = await _settled(renderer, controller.document);
 
     expect(
       committed.buffer.asUint8List(),
@@ -501,20 +514,24 @@ void main() {
   });
 
   // Each 160-unit gesture becomes three bounded document chunks. TileCache
-  // incrementally adds those chunks over the old image; both gestures must
-  // remain visible after the second update.
+  // incrementally adds those chunks over the old image (PNT-A0005-09): no
+  // full build happens for the second gesture, and both gestures remain
+  // visible after the update.
   test('adding a stroke updates a tile without redrawing old strokes', () async {
     final controller = CanvasController();
     addTearDown(controller.dispose);
     final renderer = _renderer();
+    final counters = renderer.cache.counters;
 
     controller.beginStroke(const Offset(20, 12), 1);
     controller.extendStroke(const Offset(180, 12), 1);
     controller.endStroke();
     await _settled(renderer, controller.document);
     final before = renderer.cache.tile(const TileKey(0, 0, 0))!;
-    final firstGestureChunks = controller.document.strokeCount;
-    expect(before.appliedStrokes, firstGestureChunks);
+    final firstGestureTop = controller.document.strokes.last;
+    expect(before.appliedThrough, same(firstGestureTop));
+    final fullBuilds = counters.fullBuilds;
+    final incrementalBuilds = counters.incrementalBuilds;
 
     controller.beginStroke(const Offset(20, 28), 1);
     controller.extendStroke(const Offset(180, 28), 1);
@@ -522,8 +539,10 @@ void main() {
     final after = await _settled(renderer, controller.document);
     final tile = renderer.cache.tile(const TileKey(0, 0, 0))!;
 
-    expect(tile.appliedStrokes, controller.document.strokeCount);
-    expect(tile.appliedStrokes, greaterThan(firstGestureChunks));
+    expect(tile.appliedThrough, same(controller.document.strokes.last));
+    expect(tile.appliedThrough, isNot(same(firstGestureTop)));
+    expect(counters.fullBuilds, fullBuilds);
+    expect(counters.incrementalBuilds, greaterThan(incrementalBuilds));
     // Both strokes are visible: the first survived, the second was drawn over.
     double rowInk(int y) {
       var n = 0;
@@ -536,6 +555,192 @@ void main() {
     expect(rowInk(12), greaterThan(0));
     expect(rowInk(28), greaterThan(0));
   });
+
+  // Strokes from another peer can sort below existing ones
+  // (docs/decisions/008-document-file-format.md PNT-A0014-05). The seed is
+  // stored per stroke, so the stroke above keeps its specks: rows the new
+  // stroke cannot reach stay byte for byte as they were.
+  test('a stroke keeps its grain when another is inserted below it', () async {
+    final controller = CanvasController();
+    addTearDown(controller.dispose);
+    final renderer = _renderer();
+    controller
+      ..beginStroke(const Offset(20, 10), 1)
+      ..extendStroke(const Offset(70, 10), 1)
+      ..endStroke();
+    final top = controller.document.strokes.single;
+    final before = await _settled(renderer, controller.document);
+
+    controller.insertStrokes([
+      _remoteStroke('ee:1', z: top.z - 1, from: 30, to: 170, y: 32),
+    ]);
+    final after = await _settled(renderer, controller.document);
+
+    expect(controller.document.strokes.last, same(top));
+    expect(top.seed, strokeSeedOf(top.id));
+    // Rows 2..18 hold the top stroke's ink; the new one (y = 32) cannot
+    // reach them.
+    for (var y = 2; y < 19; y++) {
+      for (var x = 0; x < _width; x++) {
+        expect(_red(after, x, y), _red(before, x, y), reason: '($x, $y)');
+      }
+    }
+    expect(_inked(after), greaterThan(_inked(before)));
+  });
+
+  // docs/decisions/008-document-file-format.md: an insert below the top or a
+  // removal rebuilds the tiles the stroke touches, at every level, while other
+  // tiles keep their images; a removed stroke's splats are released. The
+  // far tile (2, 0, 0) and the coarse tile (0, 0, -1) are requested directly,
+  // without painting, so no frame drops them from the queue.
+  test('inserting below or removing rebuilds only the touched tiles', () async {
+    final controller = CanvasController();
+    addTearDown(controller.dispose);
+    final renderer = _renderer();
+    final cache = renderer.cache;
+    final document = controller.document;
+    controller
+      ..beginStroke(const Offset(20, 12), 1)
+      ..extendStroke(const Offset(180, 12), 1)
+      ..endStroke()
+      ..beginStroke(const Offset(1100, 20), 1)
+      ..extendStroke(const Offset(1150, 20), 1)
+      ..endStroke();
+    const near = TileKey(0, 0, 0);
+    const coarse = TileKey(0, 0, -1);
+    const far = TileKey(2, 0, 0);
+
+    Future<ByteData> settleAll() async {
+      final bytes = await _settled(renderer, document);
+      cache
+        ..request(coarse)
+        ..request(far);
+      await _waitForCacheIdle(cache);
+      return bytes;
+    }
+
+    final before = await settleAll();
+    final farTile = cache.peek(far);
+    expect(farTile?.image, isNotNull);
+    for (final key in [near, coarse, far]) {
+      expect(cache.isCachedCurrent(key), isTrue, reason: '$key');
+    }
+    var fullBuilds = cache.counters.fullBuilds;
+
+    final below = _remoteStroke('ee:1', z: 0, from: 40, to: 80, y: 30);
+    controller.insertStrokes([below]);
+    expect(cache.isCachedCurrent(near), isFalse);
+    expect(cache.isCachedCurrent(coarse), isFalse);
+    expect(cache.peek(far), same(farTile));
+    expect(cache.isCachedCurrent(far), isTrue);
+    final withBelow = await settleAll();
+    expect(cache.counters.fullBuilds - fullBuilds, 2);
+    expect(_inked(withBelow), greaterThan(_inked(before)));
+    expect(cache.splatsIfReady(below.id), isNotNull);
+    fullBuilds = cache.counters.fullBuilds;
+
+    controller.removeStrokes([below.id]);
+    expect(cache.splatsIfReady(below.id), isNull);
+    expect(cache.isCachedCurrent(near), isFalse);
+    expect(cache.isCachedCurrent(coarse), isFalse);
+    expect(cache.peek(far), same(farTile));
+    final after = await settleAll();
+    expect(cache.counters.fullBuilds - fullBuilds, 2);
+    expect(
+      after.buffer.asUint8List(),
+      before.buffer.asUint8List(),
+      reason: 'the rebuilt tile must no longer show the removed stroke',
+    );
+    expect(cache.peek(far), same(farTile));
+  });
+
+  // A build that is waiting for splats when a stroke is inserted below the
+  // top of its tile must not land: its image would lack that stroke. The
+  // cache drops it and builds the tile again with both strokes.
+  test('a build racing an insert below is dropped and redone', () async {
+    final worker = _ControlledSplatWorker();
+    final cache = _renderer(worker: worker).cache;
+    final controller = CanvasController();
+    addTearDown(controller.dispose);
+    controller
+      ..beginStroke(const Offset(20, 20), 1)
+      ..extendStroke(const Offset(40, 20), 1)
+      ..endStroke();
+    const key = TileKey(0, 0, 0);
+    cache.attach(controller.document);
+    cache.request(key);
+    await worker.waitForRequests(1);
+
+    controller.insertStrokes([
+      _remoteStroke('ee:1', z: 0, from: 10, to: 30, y: 25),
+    ]);
+    worker.completeWithSplats(0);
+    await worker.waitForRequests(2);
+    expect(cache.peek(key), isNull);
+    expect(worker.strokes[1].id, 'ee:1');
+
+    worker.completeWithSplats(1);
+    await _waitForCacheIdle(cache);
+    expect(cache.isCachedCurrent(key), isTrue);
+    expect(cache.counters.builds, 1);
+  });
+
+  // Regression: a tile records the document's top stroke as appliedThrough
+  // even when that stroke lies elsewhere. Undoing that stroke frees its z
+  // (CanvasDocument.nextZ), so the next stroke gets the same z and, with id
+  // "ab:11" < "ab:9", sorts below the removed one. The tile must still see
+  // the new stroke as pending and draw it.
+  test(
+    'a stroke drawn after undoing the top one still reaches every tile',
+    () async {
+      final strokes = _undoRepro();
+      final renderer = _renderer();
+      final document = strokes.controller.document;
+      await _settled(renderer, document);
+      const key = TileKey(0, 0, 0);
+      expect(renderer.cache.peek(key)!.appliedThrough, same(strokes.far));
+
+      strokes.undoFarAndDraw();
+      final after = await _settled(renderer, document);
+
+      expect(renderer.cache.peek(key)!.appliedThrough, same(strokes.redrawn));
+      var ink = 0;
+      for (var x = 20; x < 60; x++) {
+        if (_red(after, x, 30) < 200) ink++;
+      }
+      expect(ink, greaterThan(0), reason: 'the new stroke must be drawn');
+    },
+  );
+
+  // The same, while the tile's first build is still waiting for splats: the
+  // top it will store is removed mid-build and must be moved down too.
+  test(
+    'undoing the top stroke during a build keeps later strokes pending',
+    () async {
+      final worker = _ControlledSplatWorker();
+      final cache = _renderer(worker: worker).cache;
+      final strokes = _undoRepro();
+      const key = TileKey(0, 0, 0);
+      cache.attach(strokes.controller.document);
+      cache.request(key);
+      await worker.waitForRequests(1);
+
+      strokes.undoFarAndDraw();
+      worker.completeWithSplats(0);
+      for (var i = 0; i < 200 && worker.requests.length < 2; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(worker.strokes.map((s) => s.id), [
+        strokes.near.id,
+        strokes.redrawn!.id,
+      ]);
+
+      worker.completeWithSplats(1);
+      await _waitForCacheIdle(cache);
+      expect(cache.peek(key)!.appliedThrough, same(strokes.redrawn));
+      expect(cache.isCachedCurrent(key), isTrue);
+    },
+  );
 
   // Pins the "stale tile stays visible" rule of design/canvas/tile-cache.md:
   // TiledRenderer.paint draws a tile that is behind the document
@@ -725,7 +930,71 @@ void main() {
     final splats = worker.completeWithSplats(1);
     await _waitForCacheIdle(cache);
 
-    expect(cache.splatsIfReady(0), same(splats));
+    expect(cache.splatsIfReady(document.strokes.single.id), same(splats));
     expect(logger.entries, hasLength(1));
   });
+}
+
+/// A one-chunk horizontal stroke from x = [from] to [to] at height [y], as a
+/// peer with id [id] would send it: its own seed, placed at [z].
+CanvasStroke _remoteStroke(
+  String id, {
+  required int z,
+  required double from,
+  required double to,
+  required double y,
+}) => CanvasStroke(
+  [
+    CanvasPoint(position: Offset(from, y), weight: 1),
+    CanvasPoint(position: Offset(to, y), weight: 1),
+  ],
+  id: id,
+  seed: strokeSeedOf(id),
+  z: z,
+  gesture: '$id:gesture',
+);
+
+/// The undo repro: a stroke [near] in tile (0, 0, 0), then a stroke [far] in
+/// tile (2, 0, 0) that is on top. [undoFarAndDraw] removes [far] as undo
+/// does and draws [redrawn] in tile (0, 0, 0), which gets the same z as
+/// [far] and an id ordered below it.
+class _UndoRepro {
+  _UndoRepro(this.controller, this.near, this.far);
+
+  final CanvasController controller;
+  final CanvasStroke near;
+  final CanvasStroke far;
+  CanvasStroke? redrawn;
+
+  void undoFarAndDraw() {
+    controller
+      ..removeStrokes([far.id])
+      ..beginStroke(const Offset(20, 30), 1)
+      ..extendStroke(const Offset(60, 30), 1)
+      ..endStroke();
+    final stroke = redrawn = controller.document.strokes.last;
+    expect(stroke.z, far.z);
+    expect(stroke.compareOrder(far), lessThan(0));
+  }
+}
+
+/// Builds [_UndoRepro] with ids from actor `ab` counted past 5, so [far] is
+/// `ab:9` and the redrawn stroke `ab:11`.
+_UndoRepro _undoRepro() {
+  final ids = ActorIdSource('ab');
+  for (var i = 0; i < 5; i++) {
+    ids.next();
+  }
+  final controller = CanvasController(newId: ids.next);
+  addTearDown(controller.dispose);
+  controller
+    ..beginStroke(const Offset(20, 20), 1)
+    ..extendStroke(const Offset(60, 20), 1)
+    ..endStroke()
+    ..beginStroke(const Offset(1100, 20), 1)
+    ..extendStroke(const Offset(1140, 20), 1)
+    ..endStroke();
+  final strokes = controller.document.strokes;
+  expect(strokes.map((s) => s.id), ['ab:7', 'ab:9']);
+  return _UndoRepro(controller, strokes.first, strokes.last);
 }

@@ -9,11 +9,13 @@
 //   physical stylus hardware and raster output are not verified, as noted in
 //   docs/status.md ("Not Verified").
 // Covers: lib/main.dart (PainterApp), lib/canvas/canvas_view.dart (CanvasView
-//   input handling), lib/canvas/canvas_controller.dart (CanvasController).
+//   input handling), lib/canvas/canvas_controller.dart (CanvasController),
+//   lib/canvas/canvas_viewport.dart (CanvasViewportController).
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
+import 'package:painter/canvas/canvas_viewport.dart';
 import 'package:painter/main.dart';
 
 void main() {
@@ -91,6 +93,7 @@ void main() {
     expect(stylusStroke.points.first.weight, closeTo(0.24, 0.001));
     expect(stylusStroke.points.last.weight, closeTo(0.81, 0.001));
 
+    final grabbed = viewport.toDocument(center - topLeft, size);
     final panMouse = TestPointer(3, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(
       panMouse.down(center, buttons: kSecondaryMouseButton),
@@ -102,7 +105,9 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(panMouse.up());
-    expect(viewport.pan, const Offset(12, 7));
+    final dragged = viewport.toScreen(grabbed, size) + topLeft;
+    expect(dragged.dx, closeTo(center.dx + 12, 0.001));
+    expect(dragged.dy, closeTo(center.dy + 7, 0.001));
 
     final zoomAnchor = center + const Offset(60, -40);
     final localZoomAnchor = zoomAnchor - topLeft;
@@ -114,7 +119,7 @@ void main() {
         scrollDelta: const Offset(0, -100),
       ),
     );
-    expect(viewport.zoom, greaterThan(1));
+    expect(viewport.extent, lessThan(CanvasViewportController.defaultExtent));
     final zoomedAnchor = viewport.toScreen(documentAnchor, size);
     expect(zoomedAnchor.dx, closeTo(localZoomAnchor.dx, 0.001));
     expect(zoomedAnchor.dy, closeTo(localZoomAnchor.dy, 0.001));

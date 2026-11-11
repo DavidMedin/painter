@@ -1,6 +1,6 @@
 # 001. Undo is implemented as a command history, not document snapshots
 
-Status: accepted   (supersedes: none; superseded by: none)
+Status: superseded   (supersedes: none; superseded by: 012)
 Date: 2026-11-07
 Relates to: UNDO-1, UNDO-5
 

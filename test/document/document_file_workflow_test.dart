@@ -1,16 +1,23 @@
 // What: Widget tests drive PainterApp's Open/Save/Flash lifecycle across
-//   shared Canvas panes, stored workspaces, and F1 help from a file-error
-//   dialog.
-// Why: T-005 requires document round-tripping and observable failures; the
-//   docked Manual must expose the active error-control article without replacing
-//   the current document. docs/spec/workspace.md requires that Open applies a
-//   usable stored workspace and otherwise leaves the layout alone, that Save
+//   shared Canvas panes, stored workspaces, earlier-format and format 2
+//   files, Undo/Redo from the AppBar and the keyboard, and F1 help from a
+//   file-error dialog.
+// Why: docs/spec/document-file.md requires that old files open and are saved
+//   in the current format (DOCF-3, DOCF-4) and that a file that cannot be
+//   read, or has another engine version, is refused with the reason while
+//   the current document stays (DOCF-6, DOCF-7); the docked Manual must
+//   expose the active error-control article without replacing the current
+//   document. docs/spec/workspace.md requires that Open applies a usable
+//   stored workspace and otherwise leaves the layout alone, that Save
 //   preserves the file's workspace section, and that only Flash writes one.
-// Covers: lib/main.dart (PainterApp file operations and Manual routing),
-//   lib/document/document_file_service.dart, lib/document/
-//   document_file_format.dart, CanvasDocument JSON round-tripping,
-//   Workspace.applyJson/toJson through the app, CanvasView input, and
-//   ManualPane selection from the Details control.
+//   docs/spec/undo-redo.md and docs/spec/keybinds.md (KEY-3) require Undo
+//   and Redo from buttons and Command+Z / Command+Shift+Z.
+// Covers: lib/main.dart (PainterApp file operations, Undo/Redo and Manual
+//   routing), lib/document/document_file_service.dart, lib/document/
+//   document_file_format.dart, lib/document/content_document.dart,
+//   lib/document/undo_history.dart, Workspace.applyJson/toJson through the
+//   app, CanvasView input, and ManualPane selection from the Details
+//   control.
 //
 // Overview: how the file workflow is tested
 // -----------------------------------------
@@ -20,30 +27,34 @@
 // (InAppFilePicker). These tests replace that service with
 // _TestDocumentFileService, which returns fixed paths under a temporary
 // directory, so they exercise the app-level flow (AppBar Save/Open buttons ->
-// service -> JSON -> controller -> error dialog) without any picker UI. The
-// picker dialog itself is tested in file_picker_dialog_test.dart. Files are
-// really written and read, in a per-test temp directory deleted in tearDown.
+// service -> file format -> controller -> error dialog) without any picker
+// UI. The picker dialog itself is tested in file_picker_dialog_test.dart.
+// Files are really written and read, in a per-test temp directory deleted in
+// tearDown. Fixtures are written in the earlier JSON format; Save turns them
+// into format 2, which _readFile reads back with DocumentFileContents.
 //
-// Not verified here (docs/status.md, T-005): the Open/Save UI in the running
-// macOS Release build (a live visual confirmation is still outstanding), the
-// default picker start directory or InAppDocumentFileService, and a dirty-state
-// prompt before open discards changes (a product decision still open in
-// docs/design/document/behavior.md). The failure test below checks structured
-// file-operation records; the fatal-error behavior in
-// docs/design/logging/behavior.md is not covered by this file.
+// Not verified here: the Open/Save UI in the running macOS Release build,
+// the default picker start directory or InAppDocumentFileService, a
+// dirty-state prompt before open discards changes, and fatal-error
+// behavior.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' show Rect, Size;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart'
-    show AlertDialog, BuildContext, SelectableText, SizedBox, ValueKey;
+    show AlertDialog, BuildContext, SelectableText, SizedBox, Text, ValueKey;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_controller.dart';
 import 'package:painter/canvas/canvas_view.dart';
+import 'package:painter/canvas/pencil_splats.dart' show strokeEngineVersion;
+import 'package:painter/crdt/automerge_crdt_document.dart';
+import 'package:painter/document/content_document.dart';
+import 'package:painter/document/document_file_format.dart';
 import 'package:painter/document/document_file_service.dart';
 import 'package:painter/help/manual_catalog.dart';
 import 'package:painter/help/manual_pane.dart';
@@ -120,13 +131,13 @@ void main() {
       final canvasSize = tester.getSize(canvasFinder);
       // Give the panes different views so a reset or a swap shows up.
       viewports[0]
-        ..panBy(const Offset(40, 25))
+        ..panBy(const Offset(40, 25), canvasSize)
         ..zoomAt(const Offset(50, 50), canvasSize, 2)
         ..rotateAt(const Offset(50, 50), canvasSize, 0.25);
-      viewports[1].panBy(const Offset(-7, 3));
+      viewports[1].panBy(const Offset(-7, 3), canvasSize);
       final expectedViews = [
         for (final viewport in viewports)
-          (viewport.pan, viewport.zoom, viewport.rotation),
+          (viewport.center, viewport.extent, viewport.rotation),
       ];
 
       await tester.tap(find.text('Open'));
@@ -140,7 +151,7 @@ void main() {
       expect(reopenedViews, hasLength(2));
       expect([
         for (final view in reopenedViews)
-          (view.viewport.pan, view.viewport.zoom, view.viewport.rotation),
+          (view.viewport.center, view.viewport.extent, view.viewport.rotation),
       ], expectedViews);
       final reopenedStrokes = controller.document.strokes.toList();
       for (var index = 0; index < reopenedStrokes.length; index++) {
@@ -178,7 +189,10 @@ void main() {
       tester.widget<ManualPane>(find.byType(ManualPane)).helpId,
       HelpId.openDocument,
     );
-    expect(tester.widget<CanvasView>(find.byType(CanvasView)).viewport.zoom, 2);
+    expect(
+      tester.widget<CanvasView>(find.byType(CanvasView)).viewport.extent,
+      512,
+    );
     expect(
       tester.getRect(find.byType(CanvasView)).right,
       lessThanOrEqualTo(tester.getRect(find.byType(ManualPane)).left),
@@ -245,8 +259,9 @@ void main() {
         await _tapAction(tester, 'Save');
 
         final saved = _readFile(path);
-        expect(saved['strokes'], hasLength(3), reason: 'the save really wrote');
-        expect(saved['workspace'], entry.value);
+        expect(saved.format2, isTrue, reason: 'Save writes format 2');
+        expect(saved.strokeCount, 3, reason: 'the save really wrote');
+        expect(saved.workspace, entry.value);
       },
     );
   }
@@ -263,8 +278,8 @@ void main() {
     await _tapAction(tester, 'Save');
 
     final saved = _readFile(path);
-    expect(saved['strokes'], hasLength(2));
-    expect(saved.containsKey('workspace'), isFalse);
+    expect(saved.strokeCount, 2);
+    expect(saved.hasWorkspace, isFalse);
   });
 
   // Flash writes only the layout: the file's strokes are not replaced by the
@@ -276,7 +291,7 @@ void main() {
     _writeFixture(path, workspace: 'previous section');
     await _pumpApp(tester, _TestDocumentFileService(openPath: path));
     await _tapAction(tester, 'Open');
-    final fileBefore = _readFile(path);
+    final fileBefore = _readJson(path);
     final controller = tester
         .widget<CanvasView>(find.byType(CanvasView))
         .controller;
@@ -289,33 +304,32 @@ void main() {
     expect(controller.document.strokeCount, 3);
     await _splitCanvas(tester);
     final left = tester
-        .widget<CanvasView>(find.byKey(const ValueKey('canvas-0')))
+        .widget<CanvasView>(find.byType(CanvasView).at(0))
         .viewport;
     left
-      ..panBy(const Offset(30, 5))
+      ..panBy(const Offset(30, 5), const Size(100, 100))
       ..zoomAt(Offset.zero, const Size(100, 100), 2);
-    final pan = left.pan;
+    final center = left.center;
 
     await _tapAction(tester, 'Flash layout');
 
-    final flashed = _readFile(path);
+    final flashed = _readJson(path);
     expect(flashed['strokes'], fileBefore['strokes']);
     expect(flashed['format'], fileBefore['format']);
     expect(flashed['version'], fileBefore['version']);
     final section = flashed['workspace'] as Map<String, dynamic>;
-    expect(section['version'], 1);
-    final panes = <Object?, Map<String, dynamic>>{
-      for (final pane in section['panes'] as List)
-        (pane as Map<String, dynamic>)['id']: pane,
-    };
-    expect(panes.keys, unorderedEquals([0, 1]));
-    final first = panes[0]!;
-    final second = panes[1]!;
-    expect([first['left'], first['right']], [0, 0.5]);
-    expect([second['left'], second['right']], [0.5, 1]);
+    expect(section['version'], 2);
+    final root = section['root'] as Map<String, dynamic>;
+    expect(root['split'], 'row');
+    final parts = (root['parts'] as List).cast<Map<String, dynamic>>();
+    expect([for (final part in parts) part['share']], [0.5, 0.5]);
+    final first = parts[0]['node']['pane'] as Map<String, dynamic>;
+    final second = parts[1]['node']['pane'] as Map<String, dynamic>;
     expect(first['mode'], 'canvas');
-    expect(first['state']['canvas']['zoom'], 2);
-    expect(second['state']['canvas']['zoom'], 1);
+    expect(first['state']['canvas']['extent'], 512);
+    // The new pane's view was never changed, so it stores none and opens
+    // with the default view, as checked after reopening below.
+    expect(second['mode'], 'canvas');
 
     // Dropping the second pane and reopening brings the flashed layout back
     // together with each pane's own view.
@@ -327,14 +341,14 @@ void main() {
     expect(controller.document.strokeCount, 2);
     expect(find.byType(CanvasView), findsNWidgets(2));
     final restoredLeft = tester
-        .widget<CanvasView>(find.byKey(const ValueKey('canvas-0')))
+        .widget<CanvasView>(find.byType(CanvasView).at(0))
         .viewport;
     final restoredRight = tester
-        .widget<CanvasView>(find.byKey(const ValueKey('canvas-1')))
+        .widget<CanvasView>(find.byType(CanvasView).at(1))
         .viewport;
-    expect(restoredLeft.zoom, 2);
-    expect(restoredLeft.pan, pan);
-    expect(restoredRight.zoom, 1);
+    expect(restoredLeft.extent, 512);
+    expect(restoredLeft.center, center);
+    expect(restoredRight.extent, 1024);
   });
 
   testWidgets('Flash layout is disabled until the document has a file', (
@@ -369,8 +383,8 @@ void main() {
     await _tapAction(tester, 'Open');
     await _splitCanvas(tester);
     await _tapAction(tester, 'Flash layout');
-    final flashed = _readFile(path)['workspace'];
-    expect((flashed as Map<String, dynamic>)['panes'], hasLength(2));
+    final flashed = _readJson(path)['workspace'];
+    expect((flashed as Map<String, dynamic>)['root']['parts'], hasLength(2));
 
     await tester.tap(find.byKey(const ValueKey('frame-right-join-0')));
     await tester.pumpAndSettle();
@@ -384,8 +398,8 @@ void main() {
     await _tapAction(tester, 'Save');
 
     final saved = _readFile(path);
-    expect(saved['strokes'], hasLength(3), reason: 'the save really wrote');
-    expect(saved['workspace'], flashed);
+    expect(saved.strokeCount, 3, reason: 'the save really wrote');
+    expect(saved.workspace, flashed);
   });
 
   testWidgets('Flash reports a file it cannot update', (tester) async {
@@ -402,11 +416,12 @@ void main() {
     expect(File(path).existsSync(), isFalse);
   });
 
-  // Failure modes: opening a file that is not a Painter document fails inside
-  // CanvasDocument.fromJson (FormatException shown in Details); saving to a
-  // path inside a directory that does not exist fails in writeDocument. In
-  // both cases the one stroke drawn beforehand must survive, the dialog is
-  // closed with its Close button, and the app must still be present.
+  // Failure modes: opening a file that is not a Painter document fails while
+  // reading it as the earlier format (FormatException shown in Details);
+  // saving to a path inside a directory that does not exist fails in
+  // writeDocument. In both cases the one stroke drawn beforehand must
+  // survive, the dialog is closed with its Close button, and the app must
+  // still be present.
   testWidgets('file failures show details and preserve document content', (
     tester,
   ) async {
@@ -504,7 +519,7 @@ void main() {
   testWidgets('document failures log after PainterApp unmounts', (
     tester,
   ) async {
-    final pendingRead = Completer<String>();
+    final pendingRead = Completer<Uint8List>();
     final fileService = _PendingReadDocumentFileService(
       openPath: '${temporaryDirectory.path}/pending.paint',
       readCompleter: pendingRead,
@@ -528,6 +543,205 @@ void main() {
     expect(logger.entries.single.arguments['error'], contains('read failed'));
     expect(logger.entries.single.stackTrace, isNotEmpty);
     expect(find.byType(PainterApp), findsNothing);
+  });
+
+  // DOCF-3, DOCF-4: an earlier-format file opens with its old grain, is saved
+  // as format 2, and reopens with the same strokes.
+  testWidgets('Save writes an earlier-format file as format 2', (
+    tester,
+  ) async {
+    final path = '${temporaryDirectory.path}/old.paint';
+    _writeFixture(path);
+    await _pumpApp(
+      tester,
+      _TestDocumentFileService(openPath: path, savePath: path),
+    );
+    final controller = tester
+        .widget<CanvasView>(find.byType(CanvasView))
+        .controller;
+    await _tapAction(tester, 'Open');
+    final opened = [
+      for (final s in controller.document.strokes) (s.id, s.seed, s.z),
+    ];
+    expect([for (final s in opened) s.$2], [1, 2]);
+
+    await _tapAction(tester, 'Save');
+    expect(_readFile(path).format2, isTrue);
+    await _tapAction(tester, 'Open');
+
+    expect([
+      for (final s in controller.document.strokes) (s.id, s.seed, s.z),
+    ], opened);
+  });
+
+  // DOCF-6, DOCF-7: a file that cannot be read in full or that has another
+  // engine version is refused with the reason, and the drawn stroke stays.
+  final unreadable = <String, (Uint8List Function(), Matcher)>{
+    'truncated format 2': (
+      () {
+        final content = ContentDocument.create(const AutomergeBackend());
+        final bytes = DocumentFileContents.encode(content, const []);
+        content.dispose();
+        return Uint8List.sublistView(bytes, 0, bytes.length - 5);
+      },
+      contains('FormatException'),
+    ),
+    'other engine version': (
+      () {
+        final crdt = const AutomergeBackend().create()
+          ..put(['format'], ContentDocument.formatIdentifier)
+          ..put(['version'], ContentDocument.formatVersion)
+          ..put(['engine'], strokeEngineVersion + 1)
+          ..putMap(['strokes'])
+          ..commit();
+        final bytes = DocumentContainer([
+          DocumentSection(DocumentContainer.contentKind, crdt.save()),
+        ]).encode();
+        crdt.dispose();
+        return bytes;
+      },
+      allOf(
+        contains('version ${strokeEngineVersion + 1}'),
+        contains('version $strokeEngineVersion'),
+      ),
+    ),
+  };
+  for (final entry in unreadable.entries) {
+    testWidgets('Open refuses a file (${entry.key}) and keeps the document', (
+      tester,
+    ) async {
+      final path = '${temporaryDirectory.path}/refused.paint';
+      File(path).writeAsBytesSync(entry.value.$1());
+      await _pumpApp(tester, _TestDocumentFileService(openPath: path));
+      final canvasFinder = find.byType(CanvasView);
+      final controller = tester.widget<CanvasView>(canvasFinder).controller;
+      await _drawStroke(tester, canvasFinder, 1, const Offset(10, 10));
+      final before = controller.document.strokes.single;
+
+      await _tapAction(tester, 'Open');
+
+      expect(find.text('File operation failed'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(find.textContaining('Could not open the document'))
+            .data,
+        entry.value.$2,
+      );
+      expect(controller.document.strokes.single, same(before));
+      expect(_actionEnabled(tester, 'Undo'), isTrue);
+    });
+  }
+
+  // Flash leaves a format 2 file's content section exactly as on disk, so
+  // the unsaved stroke stays out of the file (WKSP-2, WKSP-3).
+  testWidgets('Flash changes only the workspace section of a format 2 file', (
+    tester,
+  ) async {
+    final path = '${temporaryDirectory.path}/flash2.paint';
+    _writeFixture(path, workspace: 'previous section');
+    await _pumpApp(tester, _TestDocumentFileService(openPath: path));
+    await _tapAction(tester, 'Open');
+    await _tapAction(tester, 'Save');
+    final before = _readFile(path).sections;
+    await _drawStroke(
+      tester,
+      find.byType(CanvasView),
+      1,
+      const Offset(-24, 12),
+    );
+    await _splitCanvas(tester);
+
+    await _tapAction(tester, 'Flash layout');
+
+    final after = _readFile(path);
+    expect(after.strokeCount, 2);
+    expect([for (final s in after.sections) s.kind], [1, 2]);
+    expect(after.sections.first.bytes, before.first.bytes);
+    expect(after.workspace, isNotNull);
+    expect(after.workspace, isNot('previous section'));
+  });
+
+  // docs/spec/undo-redo.md: Draw A, draw B, undo -> only A; redo -> both.
+  testWidgets('Undo and Redo buttons revert and reapply a stroke', (
+    tester,
+  ) async {
+    await _pumpApp(tester, _TestDocumentFileService());
+    final canvasFinder = find.byType(CanvasView);
+    final controller = tester.widget<CanvasView>(canvasFinder).controller;
+    expect(_actionEnabled(tester, 'Undo'), isFalse);
+    expect(_actionEnabled(tester, 'Redo'), isFalse);
+    await _drawStroke(tester, canvasFinder, 1, const Offset(-20, 0));
+    await _drawStroke(tester, canvasFinder, 2, const Offset(20, 0));
+    final ids = [for (final s in controller.document.strokes) s.id];
+
+    await _tapAction(tester, 'Undo');
+    expect([for (final s in controller.document.strokes) s.id], [ids.first]);
+    expect(_actionEnabled(tester, 'Redo'), isTrue);
+
+    await _tapAction(tester, 'Redo');
+    expect([for (final s in controller.document.strokes) s.id], ids);
+    expect(_actionEnabled(tester, 'Redo'), isFalse);
+  });
+
+  testWidgets('Command+Z undoes and Command+Shift+Z redoes (KEY-3)', (
+    tester,
+  ) async {
+    await _pumpApp(tester, _TestDocumentFileService());
+    final canvasFinder = find.byType(CanvasView);
+    final controller = tester.widget<CanvasView>(canvasFinder).controller;
+    await _drawStroke(tester, canvasFinder, 1, Offset.zero);
+
+    await _commandKey(tester, LogicalKeyboardKey.keyZ);
+    expect(controller.document.strokeCount, 0);
+
+    await _commandKey(tester, LogicalKeyboardKey.keyZ, shift: true);
+    expect(controller.document.strokeCount, 1);
+  });
+
+  testWidgets('Undo is disabled mid-stroke and ignores Command+Z (UNDO-4)', (
+    tester,
+  ) async {
+    await _pumpApp(tester, _TestDocumentFileService());
+    final canvasFinder = find.byType(CanvasView);
+    final controller = tester.widget<CanvasView>(canvasFinder).controller;
+    await _drawStroke(tester, canvasFinder, 1, Offset.zero);
+    final start = tester.getCenter(canvasFinder) + const Offset(30, 30);
+    final pointer = TestPointer(2, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.down(start, buttons: kPrimaryMouseButton),
+    );
+    await tester.sendEventToBinding(
+      pointer.move(start + const Offset(9, 9), buttons: kPrimaryMouseButton),
+    );
+    await tester.pump();
+
+    expect(_actionEnabled(tester, 'Undo'), isFalse);
+    await _commandKey(tester, LogicalKeyboardKey.keyZ);
+    expect(controller.strokeInProgress, isTrue);
+    expect(controller.document.strokeCount, 1);
+
+    await tester.sendEventToBinding(pointer.up());
+    await tester.pump();
+    expect(controller.document.strokeCount, 2);
+    expect(_actionEnabled(tester, 'Undo'), isTrue);
+  });
+
+  // PNT-A0018-05: opening a document starts a new history.
+  testWidgets('Open clears the undo history', (tester) async {
+    final path = '${temporaryDirectory.path}/fresh.paint';
+    _writeFixture(path);
+    await _pumpApp(tester, _TestDocumentFileService(openPath: path));
+    final canvasFinder = find.byType(CanvasView);
+    await _drawStroke(tester, canvasFinder, 1, Offset.zero);
+    await _tapAction(tester, 'Undo');
+    expect(_actionEnabled(tester, 'Redo'), isTrue);
+    await _drawStroke(tester, canvasFinder, 2, Offset.zero);
+    expect(_actionEnabled(tester, 'Undo'), isTrue);
+
+    await _tapAction(tester, 'Open');
+
+    expect(_actionEnabled(tester, 'Undo'), isFalse);
+    expect(_actionEnabled(tester, 'Redo'), isFalse);
   });
 }
 
@@ -583,12 +797,12 @@ class _TestDocumentFileService extends DocumentFileService {
   }
 
   @override
-  Future<String> readDocument(String path) async =>
-      File(path).readAsStringSync();
+  Future<Uint8List> readDocument(String path) async =>
+      File(path).readAsBytesSync();
 
   @override
-  Future<void> writeDocument(String path, String contents) async {
-    File(path).writeAsStringSync(contents);
+  Future<void> writeDocument(String path, Uint8List bytes) async {
+    File(path).writeAsBytesSync(bytes);
   }
 }
 
@@ -598,10 +812,10 @@ class _PendingReadDocumentFileService extends _TestDocumentFileService {
     required this.readCompleter,
   });
 
-  final Completer<String> readCompleter;
+  final Completer<Uint8List> readCompleter;
 
   @override
-  Future<String> readDocument(String path) => readCompleter.future;
+  Future<Uint8List> readDocument(String path) => readCompleter.future;
 }
 
 /// Splits the Canvas pane 0 along its right edge; pane 1 is a Canvas pane with
@@ -632,32 +846,33 @@ Future<void> _pumpApp(
 );
 
 /// A layout that is easy to tell from the stored ones: two Canvas panes, the
-/// left one zoomed to 3.
+/// left one zoomed in 3 times.
 class _Arrangement {
-  _Arrangement(this.controller, this.rects, this.zoom);
+  _Arrangement(this.controller, this.rects, this.extent);
 
   final CanvasController controller;
   final List<Rect> rects;
-  final double zoom;
+  final double extent;
 }
 
 Future<_Arrangement> _arrangeCurrentLayout(WidgetTester tester) async {
   await _splitCanvas(tester);
   final left = tester
-      .widget<CanvasView>(find.byKey(const ValueKey('canvas-0')))
+      .widget<CanvasView>(find.byType(CanvasView).at(0))
       .viewport;
   left.zoomAt(Offset.zero, const Size(100, 100), 3);
   await tester.pump();
   return _Arrangement(
     tester.widget<CanvasView>(find.byType(CanvasView).first).controller,
     [for (final rect in _canvasRects(tester)) rect],
-    left.zoom,
+    left.extent,
   );
 }
 
+/// The Canvas panes' rectangles in tree order.
 List<Rect> _canvasRects(WidgetTester tester) => [
-  tester.getRect(find.byKey(const ValueKey('canvas-0'))),
-  tester.getRect(find.byKey(const ValueKey('canvas-1'))),
+  tester.getRect(find.byType(CanvasView).at(0)),
+  tester.getRect(find.byType(CanvasView).at(1)),
 ];
 
 /// Expects the layout built by [_arrangeCurrentLayout] to be exactly as left.
@@ -667,66 +882,79 @@ void _expectLayoutUntouched(WidgetTester tester, _Arrangement layout) {
   expect(_canvasRects(tester), layout.rects);
   expect(
     tester
-        .widget<CanvasView>(find.byKey(const ValueKey('canvas-0')))
+        .widget<CanvasView>(find.byType(CanvasView).at(0))
         .viewport
-        .zoom,
-    layout.zoom,
+        .extent,
+    layout.extent,
   );
 }
 
-Map<String, Object?> _paneJson(
-  int id,
-  double left,
-  double right,
-  String mode,
-  Map<String, Object?> state,
-) => {
-  'id': id,
-  'left': left,
-  'top': 0.0,
-  'right': right,
-  'bottom': 1.0,
-  'mode': mode,
-  'state': state,
+/// A pane node of a version 2 workspace section
+/// (docs/decisions/009-shared-workspaces.md PNT-A0015-07).
+Map<String, Object?> _paneNode(String mode, Map<String, Object?> state) => {
+  'pane': {'mode': mode, 'state': state},
 };
 
-Map<String, Object?> _canvasState(double zoom) => {
+/// A version 2 section whose root is a row split into [parts], each a share
+/// and a node.
+Map<String, Object?> _rowSection(
+  List<(double, Map<String, Object?>)> parts, {
+  int version = 2,
+}) => {
+  'version': version,
+  'root': {
+    'split': 'row',
+    'parts': [
+      for (final (share, node) in parts) {'share': share, 'node': node},
+    ],
+  },
+};
+
+Map<String, Object?> _canvasState(double extent) => {
   'canvas': {
-    'pan': {'dx': 0.0, 'dy': 0.0},
-    'zoom': zoom,
+    'center': {'x': 512.0, 'y': 512.0},
+    'extent': extent,
     'rotation': 0.0,
   },
 };
 
 /// A usable stored workspace: a zoomed Canvas on the left, the Manual on the
 /// right showing the Open document article.
-final Map<String, Object?> _canvasAndManualSection = {
-  'version': 1,
-  'panes': [
-    _paneJson(0, 0, 0.5, 'canvas', _canvasState(2)),
-    _paneJson(1, 0.5, 1, 'manual', {
+final Map<String, Object?> _canvasAndManualSection = _rowSection([
+  (0.5, _paneNode('canvas', _canvasState(512))),
+  (
+    0.5,
+    _paneNode('manual', {
       'manual': {'help': 'openDocument'},
     }),
-  ],
-};
+  ),
+]);
 
 /// Workspace values a file may hold that this version must not apply.
 final Map<String, Object?> _unusableSections = {
-  'overlapping panes': {
+  'version 1 rectangles': {
     'version': 1,
     'panes': [
-      _paneJson(0, 0, 0.6, 'canvas', _canvasState(2)),
-      _paneJson(1, 0.4, 1, 'canvas', _canvasState(2)),
+      {
+        'id': 0,
+        'left': 0.0,
+        'top': 0.0,
+        'right': 1.0,
+        'bottom': 1.0,
+        'mode': 'canvas',
+        'state': _canvasState(512),
+      },
     ],
   },
-  'unknown mode': {
-    'version': 1,
-    'panes': [_paneJson(0, 0, 1, 'hologram', _canvasState(2))],
-  },
-  'newer version': {
-    'version': 99,
-    'panes': [_paneJson(0, 0, 1, 'canvas', _canvasState(2))],
-  },
+  'zero share': _rowSection([
+    (0.0, _paneNode('canvas', _canvasState(512))),
+  ]),
+  'unknown mode': _rowSection([
+    (1.0, _paneNode('hologram', _canvasState(512))),
+  ]),
+  'newer version': _rowSection([
+    (1.0, _paneNode('canvas', _canvasState(512))),
+  ], version: 99),
   'not an object': 'garbage',
 };
 
@@ -747,5 +975,60 @@ void _writeFixture(String path, {Object? workspace}) {
   );
 }
 
-Map<String, dynamic> _readFile(String path) =>
+/// An earlier-format file, as JSON.
+Map<String, dynamic> _readJson(String path) =>
     jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+
+/// What a saved file holds, read the way Open reads it.
+class _SavedFile {
+  _SavedFile(this.bytes, DocumentFileContents contents)
+    : strokeCount = contents.content.canvas.strokeCount,
+      hasWorkspace = contents.sections.any(
+        (s) => s.kind == DocumentContainer.workspaceKind,
+      ),
+      workspace = contents.workspaceSection;
+
+  final Uint8List bytes;
+  final int strokeCount;
+  final bool hasWorkspace;
+  final Object? workspace;
+
+  bool get format2 => DocumentContainer.hasMagic(bytes);
+
+  /// The file's sections, content included, in file order.
+  List<DocumentSection> get sections =>
+      DocumentContainer.parse(bytes).sections;
+}
+
+_SavedFile _readFile(String path) {
+  final bytes = File(path).readAsBytesSync();
+  final contents = DocumentFileContents.read(bytes, const AutomergeBackend());
+  try {
+    return _SavedFile(bytes, contents);
+  } finally {
+    contents.content.dispose();
+  }
+}
+
+/// Whether the AppBar action labelled [label] is enabled.
+bool _actionEnabled(WidgetTester tester, String label) =>
+    tester
+        .widget<PainterActionButton>(
+          find.widgetWithText(PainterActionButton, label),
+        )
+        .onPressed !=
+    null;
+
+/// Presses [key] with Command held, and Shift too when [shift].
+Future<void> _commandKey(
+  WidgetTester tester,
+  LogicalKeyboardKey key, {
+  bool shift = false,
+}) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.sendKeyEvent(key);
+  if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  await tester.pump();
+}

@@ -14,6 +14,8 @@ KEY-3 - The default keybinding is as such:
 - stylus button 1 => toggle eraser
 - stylus button 2 => color picker
 - Help action => F1
+- Undo => Command+Z
+- Redo => Command+Shift+Z
 
 ## Acceptance Examples
 

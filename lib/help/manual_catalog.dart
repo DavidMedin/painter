@@ -2,8 +2,10 @@
 //   the in-app manual.
 // Why: F1 targets must resolve to the same centrally maintained article that
 //   the manual pane displays, rather than duplicating help text at call sites.
-// Coupled to: contextual_help.dart (hover/focus ids), manual_pane.dart (tree and
-//   article rendering), and controls that assign HelpId values.
+// Coupled to: contextual_help.dart (hover/focus ids), manual_pane.dart (tree
+//   and article rendering), and controls that assign HelpId values, among
+//   them the Undo, Redo and Session buttons in ../main.dart and the Session
+//   pane and dialogs in ../session/session_pane.dart.
 
 /// Stable identifiers assigned to interactive controls and manual articles.
 enum HelpId {
@@ -12,6 +14,8 @@ enum HelpId {
   canvas,
   openDocument,
   saveDocument,
+  undo,
+  redo,
   paneMode,
   themeMode,
   themePalette,
@@ -38,6 +42,18 @@ enum HelpId {
   resetView,
   rebuildTiles,
   copyReport,
+  openSession,
+  startSession,
+  joinSession,
+  leaveSession,
+  sessionName,
+  sessionAddress,
+  sessionAddresses,
+  sessionParticipant,
+  joinWorkspace,
+  leaveWorkspace,
+  makeHost,
+  dialogCancel,
 }
 
 /// Names the ids assigned by controls; article text stays in [ManualCatalog].
@@ -49,6 +65,8 @@ abstract final class HelpIds {
   static const themeMode = HelpId.themeMode;
   static const themePalette = HelpId.themePalette;
   static const saveDocument = HelpId.saveDocument;
+  static const undo = HelpId.undo;
+  static const redo = HelpId.redo;
   static const paneType = HelpId.paneMode;
   static const createTheme = HelpId.createTheme;
   static const paneBoundary = HelpId.paneBoundary;
@@ -73,6 +91,18 @@ abstract final class HelpIds {
   static const rebuildTiles = HelpId.rebuildTiles;
   static const copyReport = HelpId.copyReport;
   static const logEntryDetails = HelpId.logEntryDetails;
+  static const openSession = HelpId.openSession;
+  static const startSession = HelpId.startSession;
+  static const joinSession = HelpId.joinSession;
+  static const leaveSession = HelpId.leaveSession;
+  static const sessionName = HelpId.sessionName;
+  static const sessionAddress = HelpId.sessionAddress;
+  static const sessionAddresses = HelpId.sessionAddresses;
+  static const sessionParticipant = HelpId.sessionParticipant;
+  static const joinWorkspace = HelpId.joinWorkspace;
+  static const leaveWorkspace = HelpId.leaveWorkspace;
+  static const makeHost = HelpId.makeHost;
+  static const dialogCancel = HelpId.dialogCancel;
 }
 
 /// The user-facing text and navigation group for one manual page.
@@ -112,7 +142,8 @@ class ManualCatalog {
       section: 'Getting started',
       content:
           'Use the pane mode selector to choose Canvas, Diagnostics, Settings, '
-          'Manual, or Log. Hover a control and press F1 to open its manual page. '
+          'Manual, Log, or Session. Hover a control and press F1 to open its '
+          'manual page. '
           'The manual navigation tree stays beside the article so you can '
           'browse related topics.',
     ),
@@ -143,8 +174,12 @@ class ManualCatalog {
       section: 'Documents',
       content:
           'Choose a .paint file in the in-app picker. Opening replaces the '
-          'current document. A failed open leaves the current document '
-          'unchanged.',
+          'current document and starts a new undo history. Files saved by '
+          'earlier versions of Painter open as they looked. A file made '
+          'with a different stroke engine version is refused, and the error '
+          'names both versions. A failed open leaves the current document '
+          'unchanged. Open is unavailable while you are in a session; leave '
+          'the session first.',
     ),
     HelpId.saveDocument: ManualArticle(
       id: HelpId.saveDocument,
@@ -153,7 +188,31 @@ class ManualCatalog {
       section: 'Documents',
       content:
           'Choose a destination the first time you save. Later saves write to '
-          'the associated file.',
+          'the associated file. Saving writes the current file format, which '
+          'keeps every change made to the document, including undone '
+          'strokes. The pane layout stored in the file is kept as it was.',
+    ),
+    HelpId.undo: ManualArticle(
+      id: HelpId.undo,
+      title: 'Undo',
+      tooltip: 'Remove your most recent stroke (Command+Z)',
+      section: 'Painting',
+      content:
+          'Undo removes the most recent stroke you drew and keeps it for '
+          'Redo. Press it again to go further back, up to your last 256 '
+          'strokes. In a shared session it only removes your own strokes; '
+          'strokes others drew, even over yours, stay. Undo does nothing '
+          'while you are drawing. Opening a document starts a new history.',
+    ),
+    HelpId.redo: ManualArticle(
+      id: HelpId.redo,
+      title: 'Redo',
+      tooltip: 'Bring back the stroke you last undid (Command+Shift+Z)',
+      section: 'Painting',
+      content:
+          'Redo brings back the most recently undone stroke exactly as it '
+          'was drawn. Drawing a new stroke discards the strokes you could '
+          'redo. Redo does nothing while you are drawing.',
     ),
     HelpId.pickerUp: ManualArticle(
       id: HelpId.pickerUp,
@@ -214,8 +273,9 @@ class ManualCatalog {
       section: 'Workspace',
       content:
           'Choose Canvas for painting, Diagnostics for tile-cache readouts, '
-          'Settings for appearance, or Manual for this guide. Each pane has '
-          'its own mode selector.',
+          'Settings for appearance, Manual for this guide, Log for the '
+          'message history, or Session to start, join, or manage a shared '
+          'editing session. Each pane has its own mode selector.',
     ),
     HelpId.paneBoundary: ManualArticle(
       id: HelpId.paneBoundary,
@@ -224,11 +284,14 @@ class ManualCatalog {
       section: 'Workspace',
       content:
           'Each pane edge has a toolbar. Add splits the pane and puts a copy '
-          'of it against that edge. Join removes the pane across the edge and '
-          'extends this pane over it. Swap exchanges the modes of the two '
-          'panes. Join and swap need exactly one pane sharing the whole '
-          'edge. Drag a splitter to resize the panes it borders; a pane '
-          'cannot be made smaller than 100 pixels.',
+          'of it against that edge; it needs the pane to span at least a '
+          'fifth of the workspace across that edge. Join removes the pane '
+          'across the edge and extends this pane over it. Swap exchanges the '
+          'modes of the two panes. Join and swap need exactly one pane '
+          'sharing the whole edge, and join is also unavailable when the '
+          'result could not be cut into side-by-side parts. Drag a splitter '
+          'to resize the panes it separates; a pane cannot be made smaller '
+          'than a tenth of the workspace, whatever the window size.',
     ),
     HelpId.flashWorkspace: ManualArticle(
       id: HelpId.flashWorkspace,
@@ -239,7 +302,9 @@ class ManualCatalog {
           'Saving never changes the layout stored in a file. Flash writes the '
           'current pane layout, including each canvas view, into the opened '
           'document file without touching its strokes. Open and Save first '
-          'so the document has a file.',
+          'so the document has a file. In a session, Flash writes the layout '
+          'of the workspace you are a member of into your own file and '
+          'changes nobody’s layout.',
     ),
     HelpId.logEntryDetails: ManualArticle(
       id: HelpId.logEntryDetails,
@@ -302,9 +367,10 @@ class ManualCatalog {
       tooltip: 'Apply the pane layout saved in a file when opening it',
       section: 'Appearance',
       content:
-          'When on, opening a document applies the pane layout stored in its '
-          'file. When off, the file’s stored layout is ignored and the '
-          'current layout stays; the stored layout is kept in the file.',
+          'When on, opening a document, or joining a session, applies the '
+          'pane layout stored in its file. When off, the file’s stored layout '
+          'is ignored and the current layout stays; the stored layout is kept '
+          'in the file.',
     ),
     HelpId.dialogClose: ManualArticle(
       id: HelpId.dialogClose,
@@ -312,6 +378,13 @@ class ManualCatalog {
       tooltip: 'Dismiss this dialog',
       section: 'Dialogs',
       content: 'Close the current dialog and return to the app.',
+    ),
+    HelpId.dialogCancel: ManualArticle(
+      id: HelpId.dialogCancel,
+      title: 'Cancel dialog',
+      tooltip: 'Close this dialog without doing anything',
+      section: 'Dialogs',
+      content: 'Close the current dialog without making any change.',
     ),
     HelpId.dialogDetails: ManualArticle(
       id: HelpId.dialogDetails,
@@ -375,6 +448,124 @@ class ManualCatalog {
       section: 'Diagnostics',
       content: 'Copy the current tile-cache report to the clipboard.',
     ),
+    HelpId.openSession: ManualArticle(
+      id: HelpId.openSession,
+      title: 'Session pane',
+      tooltip: 'Show the Session pane',
+      section: 'Session',
+      content:
+          'Shows the Session pane, adding one beside the widest pane when no '
+          'pane is in Session mode. A session lets several people edit one '
+          'document over the network, each on their own computer, without a '
+          'server. Every participant must be able to reach the others '
+          'directly, for example on one local network.',
+    ),
+    HelpId.startSession: ManualArticle(
+      id: HelpId.startSession,
+      title: 'Start session',
+      tooltip: 'Let others join this document',
+      section: 'Session',
+      content:
+          'Starts a session for the open document and makes you its host. '
+          'You are asked for the name the other participants see, offered '
+          'your account name. The Session pane then lists the addresses at '
+          'which others can join. If the document’s file stores a layout, '
+          'joiners who load stored workspaces start with it.',
+    ),
+    HelpId.joinSession: ManualArticle(
+      id: HelpId.joinSession,
+      title: 'Join session',
+      tooltip: 'Join a session by its address',
+      section: 'Session',
+      content:
+          'Joins a session by the address of any of its participants, in the '
+          'form host:port, under the name you give. The session’s document '
+          'replaces the open one and has no file until you save it. Your '
+          'layout is the session’s stored layout when there is one and '
+          '‘Load stored workspaces’ is on, otherwise a copy of the layout you '
+          'had. A join is refused when the other painter renders strokes '
+          'with another engine version; both versions are shown. Nothing '
+          'changes when a join is refused or cannot connect.',
+    ),
+    HelpId.leaveSession: ManualArticle(
+      id: HelpId.leaveSession,
+      title: 'Leave session',
+      tooltip: 'Leave the session and keep the document',
+      section: 'Session',
+      content:
+          'Leaves the session. You keep the document with every change '
+          'received so far, and your current layout; the session goes on for '
+          'the others. When the host leaves, the participant who joined '
+          'earliest becomes host.',
+    ),
+    HelpId.sessionName: ManualArticle(
+      id: HelpId.sessionName,
+      title: 'Your name',
+      tooltip: 'The name other participants see',
+      section: 'Session',
+      content:
+          'The name shown to the other participants of the session. It starts '
+          'as your account name.',
+    ),
+    HelpId.sessionAddress: ManualArticle(
+      id: HelpId.sessionAddress,
+      title: 'Session address',
+      tooltip: 'host:port of a participant',
+      section: 'Session',
+      content:
+          'The address of any participant of the session you want to join, '
+          'as shown in their Session pane, for example 192.168.1.20:47800.',
+    ),
+    HelpId.sessionAddresses: ManualArticle(
+      id: HelpId.sessionAddresses,
+      title: 'Your session addresses',
+      tooltip: 'Addresses others can join at',
+      section: 'Session',
+      content:
+          'The addresses at which other people can join this session through '
+          'you. Give one of them to whoever should join; any participant’s '
+          'address works.',
+    ),
+    HelpId.sessionParticipant: ManualArticle(
+      id: HelpId.sessionParticipant,
+      title: 'Participants',
+      tooltip: 'A participant of this session',
+      section: 'Session',
+      content:
+          'Each participant is listed by name. The host is marked Host, you '
+          'are marked (you), and a participant you are not connected to is '
+          'marked away. A participant you hear nothing from for 10 seconds '
+          'is treated as having left.',
+    ),
+    HelpId.joinWorkspace: ManualArticle(
+      id: HelpId.joinWorkspace,
+      title: 'Join workspace',
+      tooltip: 'Share this participant’s pane layout',
+      section: 'Session',
+      content:
+          'Makes you a member of this participant’s workspace: you both see '
+          'and edit the same panes, modes, and canvas views. Your own layout '
+          'is kept for you to return to.',
+    ),
+    HelpId.leaveWorkspace: ManualArticle(
+      id: HelpId.leaveWorkspace,
+      title: 'Leave workspace',
+      tooltip: 'Return to your own pane layout',
+      section: 'Session',
+      content:
+          'Leaves the workspace you joined. Your earlier layout returns if it '
+          'still exists; otherwise you keep a copy of the layout you leave.',
+    ),
+    HelpId.makeHost: ManualArticle(
+      id: HelpId.makeHost,
+      title: 'Make host',
+      tooltip: 'Make this participant the host',
+      section: 'Session',
+      content:
+          'Only the host sees this. It makes the participant the host of the '
+          'session; the host is a label and grants no extra rights besides '
+          'passing the label on.',
+    ),
   };
 
   static const sections = <ManualSection>[
@@ -382,7 +573,10 @@ class ManualCatalog {
       title: 'Getting started',
       articles: [HelpId.general, HelpId.manualNavigation],
     ),
-    ManualSection(title: 'Painting', articles: [HelpId.canvas]),
+    ManualSection(
+      title: 'Painting',
+      articles: [HelpId.canvas, HelpId.undo, HelpId.redo],
+    ),
     ManualSection(
       title: 'Documents',
       articles: [
@@ -400,6 +594,22 @@ class ManualCatalog {
     ManualSection(
       title: 'Workspace',
       articles: [HelpId.paneMode, HelpId.paneBoundary, HelpId.flashWorkspace],
+    ),
+    ManualSection(
+      title: 'Session',
+      articles: [
+        HelpId.openSession,
+        HelpId.startSession,
+        HelpId.joinSession,
+        HelpId.leaveSession,
+        HelpId.sessionName,
+        HelpId.sessionAddress,
+        HelpId.sessionAddresses,
+        HelpId.sessionParticipant,
+        HelpId.joinWorkspace,
+        HelpId.leaveWorkspace,
+        HelpId.makeHost,
+      ],
     ),
     ManualSection(
       title: 'Appearance',
@@ -427,7 +637,7 @@ class ManualCatalog {
     ManualSection(title: 'Logging', articles: [HelpId.logEntryDetails]),
     ManualSection(
       title: 'Dialogs',
-      articles: [HelpId.dialogClose, HelpId.dialogDetails],
+      articles: [HelpId.dialogClose, HelpId.dialogCancel, HelpId.dialogDetails],
     ),
   ];
 

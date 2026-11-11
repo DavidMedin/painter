@@ -167,6 +167,9 @@ class TileInfo {
 
   /// False for a built tile that no stroke touches.
   final bool hasImage;
+
+  /// Document strokes, bottom first, that the tile's image accounts for:
+  /// those ordered at or below its `CachedTile.appliedThrough`.
   final int appliedStrokes;
 
   /// Whether every touching stroke is already drawn into the tile.

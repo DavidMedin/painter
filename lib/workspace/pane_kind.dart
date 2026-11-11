@@ -3,7 +3,8 @@
 //   and writes its name to a file) and the pane UI (../ui/pane_system.dart)
 //   need the mode list; a separate file keeps them from importing each other.
 // Coupled to: workspace.dart (serializes `name`), pane_system.dart (dropdown
-//   labels and icons), and main.dart (chooses content per mode).
+//   labels and icons), and main.dart (chooses content per mode, among them
+//   ../session/session_pane.dart for [PaneKind.session]).
 //   Behavior: docs/spec/panes.md (PANE-6 to PANE-8).
 
 import 'package:flutter/material.dart';
@@ -15,7 +16,8 @@ enum PaneKind {
   diagnostics('Diagnostics', Icons.analytics_outlined),
   settings('Settings', Icons.settings_outlined),
   manual('Manual', Icons.menu_book_outlined),
-  log('Log', Icons.receipt_long_outlined);
+  log('Log', Icons.receipt_long_outlined),
+  session('Session', Icons.group_outlined);
 
   const PaneKind(this.label, this.icon);
 

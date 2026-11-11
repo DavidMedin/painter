@@ -56,10 +56,11 @@ class TiledRenderer {
   late final TileCache cache;
 
   // The current live chunk is not tiled; see _paintActive. Its stream keeps
-  // splats generated so far, keyed by seed and source-list identity.
+  // splats generated so far, keyed by the chunk's stroke id and source-list
+  // identity.
   SplatStream? _activeStream;
   List<CanvasPoint>? _activeSource;
-  int _activeSeed = 0;
+  String? _activeId;
 
   CanvasDocument? _activeDocument;
   final ui.Paint _atlasPaint = ui.Paint()
@@ -82,7 +83,11 @@ class TiledRenderer {
   ///
   /// [canvas] must already carry the document-to-screen transform. [visible] is
   /// the document-space rectangle on screen and [pixelsPerUnit] the on-screen
-  /// size of one document unit (zoom times device pixel ratio).
+  /// size of one document unit (the view's pixel zoom,
+  /// `CanvasViewportController.zoomFor`, times the device pixel ratio).
+  /// [active] is the live chunk and [activeId] the stroke id it will be
+  /// committed under (`CanvasController.activeStrokeId`); it must be given
+  /// whenever [active] is not empty.
   ///
   /// Per frame: attach the document to [cache]; choose the level with
   /// `TileGrid.levelFor`; for each visible tile at that level, draw the cached
@@ -103,9 +108,11 @@ class TiledRenderer {
     ui.Canvas canvas, {
     required CanvasDocument document,
     required List<CanvasPoint> active,
+    String? activeId,
     required ui.Rect visible,
     required double pixelsPerUnit,
   }) {
+    assert(active.isEmpty || activeId != null, 'a live chunk needs its id');
     final clock = Stopwatch()..start();
     cache.attach(document);
     _retainCommittedActive(document);
@@ -138,7 +145,7 @@ class TiledRenderer {
             canvas,
             document,
             TileGrid.rectOf(key),
-            tile.appliedStrokes,
+            tile.appliedThrough,
           );
         }
         if (tile.image == null) {
@@ -154,7 +161,7 @@ class TiledRenderer {
       } else {
         final fallback = _drawFallback(canvas, document, key, paint, wanted);
         if (fallback == TileDraw.missing) {
-          _drawPendingSplats(canvas, document, TileGrid.rectOf(key), 0);
+          _drawPendingSplats(canvas, document, TileGrid.rectOf(key), null);
         }
         frame.draws[key] = fallback;
       }
@@ -163,7 +170,7 @@ class TiledRenderer {
     cache.setWanted(wanted);
 
     // Drawn after the tiles so it sits on top; never cached as a tile.
-    _paintActive(canvas, document, active);
+    _paintActive(canvas, document, active, activeId);
     frame.activeSplats = _activeStream?.batch.count ?? 0;
     frame.recordMillis = clock.elapsedMicroseconds / 1000;
     recordHistory.addLast(frame.recordMillis);
@@ -221,7 +228,7 @@ class TiledRenderer {
           canvas,
           document,
           TileGrid.rectOf(key),
-          tile.appliedStrokes,
+          tile.appliedThrough,
         );
         frame.blank++;
         return TileDraw.blank;
@@ -244,7 +251,7 @@ class TiledRenderer {
         canvas,
         document,
         TileGrid.rectOf(key),
-        tile.appliedStrokes,
+        tile.appliedThrough,
       );
       frame.fallbackCoarser++;
       return TileDraw.coarser;
@@ -285,7 +292,7 @@ class TiledRenderer {
           canvas,
           document,
           TileGrid.rectOf(child),
-          tile.appliedStrokes,
+          tile.appliedThrough,
         );
       }
       if (found) return TileDraw.finer;
@@ -295,45 +302,49 @@ class TiledRenderer {
 
   /// Retains the just-committed live chunk's already-generated splats in the
   /// cache so stale tiles can draw them while their replacement is rasterized.
+  /// The chunk is committed once the document holds a stroke with its id.
   void _retainCommittedActive(CanvasDocument document) {
     final stream = _activeStream;
     final source = _activeSource;
+    final id = _activeId;
     if (stream == null ||
         source == null ||
-        !identical(_activeDocument, document)) {
+        id == null ||
+        !identical(_activeDocument, document) ||
+        document.strokeById(id) == null) {
       return;
     }
-    final index = _activeSeed - 1;
-    if (index < 0 || index >= document.strokeCount) return;
-    if (document.strokeAt(index).seed != _activeSeed) return;
 
     // The source list is no longer mutated after commit; extend before sharing
     // the stream's buffers in case no frame recorded its final points.
     stream.extend(source);
     final batch = stream.batch;
     cache.cacheLiveSplats(
-      index,
+      id,
       StrokeSplats(batch.count, batch.transforms, batch.colors),
     );
   }
 
   /// Draws ready splats absent from a tile image, clipped to the exact area
-  /// that image covers. Cache replacement makes this overlay unnecessary.
+  /// that image covers: those of strokes ordered above [appliedThrough]
+  /// (`CachedTile.appliedThrough`; null for every stroke). Cache replacement
+  /// makes this overlay unnecessary.
   void _drawPendingSplats(
     ui.Canvas canvas,
     CanvasDocument document,
     ui.Rect region,
-    int appliedStrokes,
+    CanvasStroke? appliedThrough,
   ) {
-    if (appliedStrokes >= document.strokeCount) return;
+    final first = document.indexAbove(appliedThrough);
+    if (first >= document.strokeCount) return;
     canvas.save();
     canvas.clipRect(region);
-    for (var i = appliedStrokes; i < document.strokeCount; i++) {
+    for (var i = first; i < document.strokeCount; i++) {
       final stroke = document.strokeAt(i);
       if (!stroke.bounds.inflate(PencilSplats.inkMargin).overlaps(region)) {
         continue;
       }
-      final splats = cache.splatsIfReady(i);
+      final splats = cache.splatsIfReady(stroke.id);
       if (splats == null || splats.count == 0) continue;
       canvas.drawRawAtlas(
         sprite,
@@ -353,32 +364,32 @@ class TiledRenderer {
   /// document strokes; their generated splats cover stale tiles until the
   /// asynchronous replacement images land.
   ///
-  /// The stream is reset when no chunk is active, when the seed changes, or
+  /// The stream is reset when no chunk is active, when [activeId] changes, or
   /// when [active] is a different list instance. `CanvasController.activePoints`
   /// returns a new list when a chunk is committed, so identity marks rollover.
-  /// `CanvasDocument.nextSeed` equals the `CanvasStroke.seed` used on commit,
-  /// preserving that chunk's grain while it moves into the cache.
+  /// The stream is seeded with `strokeSeedOf(activeId)`, the
+  /// `CanvasStroke.seed` the chunk is committed with, preserving its grain
+  /// while it moves into the cache.
   void _paintActive(
     ui.Canvas canvas,
     CanvasDocument document,
     List<CanvasPoint> active,
+    String? activeId,
   ) {
-    if (active.isEmpty) {
+    if (active.isEmpty || activeId == null) {
       _activeStream = null;
       _activeSource = null;
+      _activeId = null;
       _activeDocument = null;
       return;
     }
-    // This chunk becomes the next committed stroke; reuse its seed so the
-    // grain does not change on commit. A rollover starts a new list and seed.
-    final seed = document.nextSeed;
     var stream = _activeStream;
     if (stream == null ||
-        _activeSeed != seed ||
+        _activeId != activeId ||
         !identical(_activeSource, active) ||
         !identical(_activeDocument, document)) {
-      stream = _activeStream = SplatStream(seed);
-      _activeSeed = seed;
+      stream = _activeStream = SplatStream(strokeSeedOf(activeId));
+      _activeId = activeId;
       _activeSource = active;
       _activeDocument = document;
     }

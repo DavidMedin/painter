@@ -46,7 +46,7 @@ class StrokeSplats {
 /// objects.
 ///
 /// Owned by `TileCache`, which calls [generate] from `TileCache._splatsFor` and
-/// caches the results per stroke index; [dispose] is called from
+/// caches the results per stroke id; [dispose] is called from
 /// `TileCache.dispose`. The isolate is started on the first [generate], not on
 /// construction. The worker handles one request at a time, so callers start
 /// several [generate] calls first and await them afterward to keep it busy

@@ -1,11 +1,13 @@
 // What: Widget tests drive synthetic pointer input through CanvasView and
 //   verify shared document updates, pane-local viewport state, and white paper.
-// Why: T-003 acceptance covers canvas controls
-// (design/canvas/vector-canvas.md); design/canvas/tile-cache.md adds the
-//   bounded-chunk requirement, and pane behavior needs independent transforms.
-//   Mouse/stylus events are synthetic; dark-theme paper is checked as pixels.
-// Covers: lib/canvas/canvas_view.dart (CanvasView input and painting) and
-//   lib/canvas/canvas_controller.dart (document, active chunks, viewports).
+// Why: The canvas controls (docs/decisions/003-vector-canvas.md), bounded
+//   chunks (docs/decisions/004-tile-cache.md) and independent per-pane views
+//   (docs/spec/canvas.md CNVS-3, CNVS-6) are what a user drives with the
+//   mouse and stylus. Events are synthetic; dark-theme paper is checked as
+//   pixels.
+// Covers: lib/canvas/canvas_view.dart (CanvasView input and painting),
+//   lib/canvas/canvas_controller.dart (document, active chunks) and
+//   lib/canvas/canvas_viewport.dart (views driven by input).
 
 import 'dart:ui' as ui;
 
@@ -15,17 +17,20 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_controller.dart';
 import 'package:painter/canvas/canvas_view.dart';
+import 'package:painter/canvas/canvas_viewport.dart';
 
 void main() {
-  // Mouse weight is always 1.0 regardless of pressure (docs/design/canvas/behavior.md).
-  // Here the canvas fills the test window from the origin (no AppBar), so a
-  // local position equals a global one and the stored document-space points
-  // can be compared directly with the event positions at the unchanged
-  // default viewport.
+  // Mouse weight is always 1.0 regardless of pressure. Here the canvas fills
+  // the test window from the origin (no AppBar), so a local position equals a
+  // global one and the stored points are the event positions mapped through
+  // the pane's view.
   testWidgets('mouse stroke records document-space points at fixed weight', (
     tester,
   ) async {
     final controller = await _pumpCanvas(tester);
+    final viewport = tester
+        .widget<CanvasView>(find.byType(CanvasView))
+        .viewport;
     final size = tester.getSize(find.byType(CanvasView));
     final start = Offset(size.width / 2 - 30, size.height / 2 - 20);
     final mouse = TestPointer(1, PointerDeviceKind.mouse);
@@ -41,8 +46,11 @@ void main() {
 
     final stroke = controller.document.strokes.single;
     expect(stroke.points, hasLength(2));
-    expect(stroke.points.first.position, start);
-    expect(stroke.points.last.position, start + const Offset(20, 10));
+    expect(stroke.points.first.position, viewport.toDocument(start, size));
+    expect(
+      stroke.points.last.position,
+      viewport.toDocument(start + const Offset(20, 10), size),
+    );
     expect(stroke.points.map((point) => point.weight), everyElement(1));
     controller.dispose();
   });
@@ -52,6 +60,9 @@ void main() {
   ) async {
     final controller = await _pumpCanvas(tester);
     final size = tester.getSize(find.byType(CanvasView));
+    final viewport = tester
+        .widget<CanvasView>(find.byType(CanvasView))
+        .viewport;
     final start = Offset(size.width / 2 - 300, size.height / 2);
     final end = start + const Offset(600, 0);
     final mouse = TestPointer(7, PointerDeviceKind.mouse);
@@ -68,11 +79,12 @@ void main() {
       controller.activePoints.length,
       lessThanOrEqualTo(CanvasController.activeStrokeChunkPoints),
     );
-    expect(controller.activePoints.last.position, end);
+    final documentEnd = viewport.toDocument(end, size);
+    expect(controller.activePoints.last.position, documentEnd);
 
     await tester.sendEventToBinding(mouse.up());
     expect(controller.activePoints, isEmpty);
-    expect(controller.document.strokes.last.points.last.position, end);
+    expect(controller.document.strokes.last.points.last.position, documentEnd);
     controller.dispose();
   });
 
@@ -122,11 +134,11 @@ void main() {
   });
 
   // One test for the three mouse viewport controls
-  // (design/canvas/vector-canvas.md): secondary- button drag pans, vertical
-  // wheel zooms about the pointer, middle-button drag rotates. The zoom check
-  // asserts the document point under the pointer stays at the same screen
-  // position (toDocument before, toScreen after). Rotation of 50 px of drag
-  // giving 0.5 rad is the current dx / 100 rule in CanvasView.
+  // (docs/decisions/003-vector-canvas.md): secondary-button drag pans,
+  // vertical wheel zooms about the pointer, middle-button drag rotates. The
+  // pan and zoom checks assert that the document point under the pointer
+  // stays under it (toDocument before, toScreen after). Rotation of 50 px of
+  // drag giving 0.5 rad is the current dx / 100 rule in CanvasView.
   testWidgets('mouse buttons pan and rotate, and wheel zooms', (tester) async {
     final controller = await _pumpCanvas(tester);
     final viewport = tester
@@ -134,6 +146,7 @@ void main() {
         .viewport;
     final initialSize = tester.getSize(find.byType(CanvasView));
     final start = Offset(initialSize.width / 2, initialSize.height / 2);
+    final grabbed = viewport.toDocument(start, initialSize);
 
     final panMouse = TestPointer(3, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(
@@ -146,7 +159,9 @@ void main() {
       ),
     );
     await tester.sendEventToBinding(panMouse.up());
-    expect(viewport.pan, const Offset(12, 7));
+    final dragged = viewport.toScreen(grabbed, initialSize);
+    expect(dragged.dx, closeTo(start.dx + 12, 0.001));
+    expect(dragged.dy, closeTo(start.dy + 7, 0.001));
 
     final zoomAnchor = start + const Offset(60, -40);
     final documentAnchor = viewport.toDocument(zoomAnchor, initialSize);
@@ -157,7 +172,7 @@ void main() {
         scrollDelta: const Offset(0, -100),
       ),
     );
-    expect(viewport.zoom, greaterThan(1));
+    expect(viewport.extent, lessThan(CanvasViewportController.defaultExtent));
     final zoomedAnchor = viewport.toScreen(documentAnchor, initialSize);
     expect(zoomedAnchor.dx, closeTo(zoomAnchor.dx, 0.001));
     expect(zoomedAnchor.dy, closeTo(zoomAnchor.dy, 0.001));
@@ -222,20 +237,24 @@ void main() {
       mouse.move(start + const Offset(18, 9), buttons: kSecondaryMouseButton),
     );
     await tester.sendEventToBinding(mouse.up());
-    expect(firstViewport.pan, const Offset(18, 9));
-
     final size = tester.getSize(first);
+    final dragged = firstViewport.toScreen(
+      CanvasViewportController.defaultCenter,
+      size,
+    );
+    expect(dragged.dx, closeTo(size.width / 2 + 18, 0.001));
+    expect(dragged.dy, closeTo(size.height / 2 + 9, 0.001));
+
     final center = Offset(size.width / 2, size.height / 2);
     firstViewport
       ..zoomAt(center, size, 2)
       ..rotateAt(center, size, 0.25);
 
-    expect(firstViewport.zoom, 2);
+    expect(firstViewport.extent, CanvasViewportController.defaultExtent / 2);
     expect(firstViewport.rotation, 0.25);
     expect(controller.document.strokeCount, 1);
-    expect(firstViewport.pan, isNot(secondViewport.pan));
-    expect(secondViewport.pan, Offset.zero);
-    expect(secondViewport.zoom, 1);
+    expect(secondViewport.center, CanvasViewportController.defaultCenter);
+    expect(secondViewport.extent, CanvasViewportController.defaultExtent);
     expect(secondViewport.rotation, 0);
   });
 
@@ -303,8 +322,7 @@ void main() {
                         child: CustomPaint(painter: _SolidPainter(chrome)),
                       ),
                       Expanded(
-                        child:
-                            CustomPaint(painter: _SolidPainter(neighbor)),
+                        child: CustomPaint(painter: _SolidPainter(neighbor)),
                       ),
                     ],
                   ),
@@ -347,12 +365,7 @@ void main() {
     // and a 560px content area below it.
     Color argbAt(int x, int y) {
       final i = (y * image.width + x) * 4;
-      return Color.fromARGB(
-        bytes[i + 3],
-        bytes[i],
-        bytes[i + 1],
-        bytes[i + 2],
-      );
+      return Color.fromARGB(bytes[i + 3], bytes[i], bytes[i + 1], bytes[i + 2]);
     }
 
     expect(argbAt(600, 320), CanvasView.paperColor,

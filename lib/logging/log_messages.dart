@@ -13,6 +13,7 @@ abstract final class LogMessages {
     'document.operation.failed':
         'Failed to {operation} Painter document: {error}',
     'splat.worker.failed': 'Could not generate canvas splats: {error}',
+    'session.operation.failed': 'Could not {operation}: {error}',
     'flutter.framework.error': 'Flutter framework error: {error}',
     'error.unhandled': 'Unhandled application error: {error}',
     'log.file.invalid_entries':

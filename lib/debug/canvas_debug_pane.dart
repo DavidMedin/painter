@@ -63,6 +63,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../canvas/canvas_controller.dart';
+import '../canvas/canvas_viewport.dart';
 import '../canvas/pencil_splats.dart';
 import '../canvas/tile_grid.dart';
 import '../canvas/tile_stats.dart';
@@ -242,19 +243,20 @@ class _CanvasDebugPaneState extends State<CanvasDebugPane> {
                 ),
               ],
             ),
-            // Viewport: the selected Canvas pane's zoom/rotation/pan plus the
+            // Viewport: the selected Canvas pane's center/extent/rotation plus
             // size of TileFrameStats.visibleRect.
             ImSection(
               title: 'Viewport',
               children: [
-                ImValue('zoom', r.zoom.toStringAsFixed(3)),
+                ImValue(
+                  'center',
+                  '${r.center.dx.toStringAsFixed(1)}, '
+                      '${r.center.dy.toStringAsFixed(1)}',
+                ),
+                ImValue('extent', r.extent.toStringAsFixed(1)),
                 ImValue(
                   'rotation',
                   '${(r.rotation * 180 / math.pi).toStringAsFixed(1)}\u00B0',
-                ),
-                ImValue(
-                  'pan',
-                  '${r.pan.dx.toStringAsFixed(1)}, ${r.pan.dy.toStringAsFixed(1)}',
                 ),
                 ImValue(
                   'visible (doc units)',
@@ -492,9 +494,9 @@ class _Reading {
   _Reading({
     required this.frame,
     required this.counters,
-    required this.zoom,
+    required this.center,
+    required this.extent,
     required this.rotation,
-    required this.pan,
     required this.imageTiles,
     required this.strokes,
     required this.points,
@@ -565,9 +567,9 @@ class _Reading {
     return _Reading(
       frame: copy,
       counters: snapshot,
-      zoom: viewport.zoom,
+      center: viewport.center,
+      extent: viewport.extent,
       rotation: viewport.rotation,
-      pan: viewport.pan,
       imageTiles: cache.imageTiles,
       strokes: controller.document.strokeCount,
       points: points,
@@ -600,9 +602,9 @@ class _Reading {
   // `TiledRenderer.frame.draws`, not this snapshot.
   final TileFrameStats frame;
   final TileCacheCounters counters;
-  final double zoom;
+  final Offset center;
+  final double extent;
   final double rotation;
-  final Offset pan;
   final int imageTiles;
   final int strokes;
   final int points;
@@ -638,9 +640,10 @@ class _Reading {
     final b = StringBuffer()
       ..writeln('painter tile cache report')
       ..writeln(
-        'viewport: zoom=${zoom.toStringAsFixed(3)} '
-        'rotation=${rotation.toStringAsFixed(3)}rad '
-        'pan=${pan.dx.toStringAsFixed(1)},${pan.dy.toStringAsFixed(1)}',
+        'viewport: center=${center.dx.toStringAsFixed(1)},'
+        '${center.dy.toStringAsFixed(1)} '
+        'extent=${extent.toStringAsFixed(1)} '
+        'rotation=${rotation.toStringAsFixed(3)}rad',
       )
       ..writeln(
         'frame: level=L${frame.level} visible=${frame.visible} '

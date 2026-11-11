@@ -52,8 +52,13 @@ import 'canvas_controller.dart';
 //     is drawn into both neighbouring tiles and must be identical in each or a
 //     seam shows; a tile rebuilt after eviction must reproduce the same
 //     specks; and each live chunk must look the same when committed
-//     (design/canvas/tile-cache.md). Seeds come from `CanvasStroke.seed` (see
-//     the overview in canvas_controller.dart).
+//     (docs/decisions/004-tile-cache.md). Seeds come from `CanvasStroke.seed`,
+//     which is stored with the stroke (see the overview in
+//     canvas_controller.dart).
+//   - Every peer and every later run must turn the same stroke data into the
+//     same splats, so `strokeEngineVersion` names this generation; a file or
+//     Session with another value is to be refused
+//     (docs/decisions/008-document-file-format.md PNT-A0014-07).
 //   - Two consumers. Committed chunks: `TileCache._splatsFor` asks
 //     `SplatWorker.generate` (splat_worker.dart), whose isolate runs
 //     `PencilSplats.build` and returns `StrokeSplats`; `TileCache._build`
@@ -73,6 +78,15 @@ import 'canvas_controller.dart';
 // first-pass choices judged on offscreen renders, not reviewed by an artist
 // (design/canvas/pencil-splats.md).
 // ---------------------------------------------------------------------------
+
+/// The Engine version: which way of turning stroke data (points, weights,
+/// seed) into splats this build uses
+/// (docs/decisions/008-document-file-format.md PNT-A0014-07).
+///
+/// Any change to how stroke data becomes splats (sampling, the hash, the
+/// splat count, placement, size, rotation or alpha) must increment it, or
+/// stored strokes would render differently from how they were drawn.
+const int strokeEngineVersion = 1;
 
 /// Flat, GPU-ready buffers describing many small gaussian "pencil specks".
 ///

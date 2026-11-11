@@ -1,6 +1,6 @@
 // What: The seam between the app and the file system for opening and saving
-// documents: the abstract [DocumentFileService] (choose a path, read text,
-// write text) and its production implementation [InAppDocumentFileService],
+// documents: the abstract [DocumentFileService] (choose a path, read bytes,
+// write bytes) and its production implementation [InAppDocumentFileService],
 // which picks paths with the in-app [InAppFilePicker]. Also holds the
 // overview of the whole open/save system (this file plus
 // file_picker_dialog.dart).
@@ -10,8 +10,8 @@
 // one small interface lets tests substitute fixed paths and skip the picker
 // UI (see _TestDocumentFileService in
 // test/document/document_file_workflow_test.dart), and keeps all dart:io
-// file access for documents in one place. This file knows nothing about
-// strokes or JSON: it moves strings; ../main.dart does the encoding.
+// file access for documents in one place. This file knows nothing about the
+// file format: it moves bytes; document_file_format.dart encodes them.
 //
 // ---------------------------------------------------------------------------
 // Open/save flow overview
@@ -19,20 +19,19 @@
 // What it is: the pieces that let the user open a `.paint` document and
 // save the current one: PainterApp._openDocument / PainterApp._saveDocument
 // in ../main.dart (orchestration, error handling), DocumentFileService
-// (this file: path choice + string I/O), and InAppFilePicker in
+// (this file: path choice + byte I/O), and InAppFilePicker in
 // file_picker_dialog.dart (the dialog that actually shows the files).
 //
-// Why an in-house picker instead of a native dialog or plugin: decided in
-// docs/design/document/file-format-and-flow.md. The picker is built
-// from ordinary Flutter widgets so `flutter test` can drive the entire
+// Why an in-house picker instead of a native dialog or plugin: the picker is
+// built from ordinary Flutter widgets so `flutter test` can drive the entire
 // open/save flow headlessly (navigate, type a name, confirm, cancel) with no
 // native dialog and no file-picker plugin dependency (no `file_selector` or
-// other plugin was added). An earlier attempt with
-// native dialogs (`file_selector`) could not be verified in a local macOS VM
-// guest; the ADR records that story and keeps it on the
-// `vm-native-dialog-approach` branch. The cost, also from the ADR, is that the
-// picker does not inherit native behavior (recents, search, iCloud locations,
-// keyboard shortcuts).
+// other plugin was added). An earlier attempt with native dialogs
+// (`file_selector`) could not be verified in a local macOS VM guest; it is
+// kept on the `vm-native-dialog-approach` branch. The cost is that the
+// picker does not inherit native behavior (recents, search, iCloud
+// locations, keyboard shortcuts). The design document that recorded this
+// choice is no longer under docs/.
 //
 // Why picking is separate from I/O: the two methods that need a
 // BuildContext (chooseOpenPath, chooseSavePath) are the only ones that touch
@@ -47,18 +46,19 @@
 //      service calls InAppFilePicker.show, which shows a dialog and resolves
 //      to an absolute path, or null if the user cancels.
 //   2. PainterApp calls readDocument (open) or writeDocument (save), then
-//      converts between the text and CanvasDocument itself
-//      (CanvasDocument.fromJson / toJson in ../canvas/canvas_controller.dart).
+//      converts between the bytes and the content document itself
+//      (DocumentFileContents in document_file_format.dart).
 //   3. Errors are not caught here. File-system failures from
 //      readDocument / writeDocument propagate as exceptions to PainterApp,
-//      whose catch blocks show the error dialog
-//      (docs/design/document/behavior.md).
-//      Malformed documents are rejected later, by CanvasDocument.fromJson.
+//      whose catch blocks show the error dialog (docs/spec/document-file.md
+//      DOCF-7). Malformed documents are rejected later, by
+//      DocumentFileContents.read.
 // The save picker returns a path that always ends in `.paint`; the open
 // picker lists only directories and `.paint` files.
 // ---------------------------------------------------------------------------
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 
@@ -84,14 +84,14 @@ abstract class DocumentFileService {
   /// document yet.
   Future<String?> chooseSavePath(BuildContext context, String suggestedName);
 
-  /// Returns the raw text of the file at [path]. Throws [FileSystemException]
-  /// if it cannot be read; interpreting the text is the caller's job.
-  Future<String> readDocument(String path) => File(path).readAsString();
+  /// Returns the bytes of the file at [path]. Throws [FileSystemException]
+  /// if it cannot be read; interpreting them is the caller's job.
+  Future<Uint8List> readDocument(String path) => File(path).readAsBytes();
 
-  /// Writes [contents] to [path], replacing any existing file. Throws
+  /// Writes [bytes] to [path], replacing any existing file. Throws
   /// [FileSystemException] on failure.
-  Future<void> writeDocument(String path, String contents) =>
-      File(path).writeAsString(contents);
+  Future<void> writeDocument(String path, Uint8List bytes) =>
+      File(path).writeAsBytes(bytes, flush: true);
 }
 
 /// The production [DocumentFileService]: picks files through
@@ -99,8 +99,6 @@ abstract class DocumentFileService {
 class InAppDocumentFileService extends DocumentFileService {
   /// Where the picker opens: the user's home directory (`$HOME`), or the
   /// process's current directory if `$HOME` is unset.
-  /// design/document/file-format-and-flow.md specifies starting from the home
-  /// directory.
   Directory _startDirectory() {
     final home = Platform.environment['HOME'];
     return home != null ? Directory(home) : Directory.current;

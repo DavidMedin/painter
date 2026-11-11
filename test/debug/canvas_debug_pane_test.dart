@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
+import 'package:painter/canvas/canvas_viewport.dart';
 import 'package:painter/canvas/tile_stats.dart';
 import 'package:painter/canvas/tiled_renderer.dart';
 import 'package:painter/debug/canvas_debug_options.dart';
@@ -80,8 +81,10 @@ Future<void> _drawStroke(WidgetTester tester, [Finder? canvas]) async {
   await tester.sendEventToBinding(
     mouse.down(start, buttons: kPrimaryMouseButton),
   );
+  // Short enough to stay one stroke (under the 64-unit chunk length) even in
+  // a 100 px pane, where the default 1024-unit extent maps 1 px to ~10 units.
   await tester.sendEventToBinding(
-    mouse.move(start + const Offset(40, 10), buttons: kPrimaryMouseButton),
+    mouse.move(start + const Offset(4, 1), buttons: kPrimaryMouseButton),
   );
   await tester.sendEventToBinding(mouse.up());
   await tester.pump();
@@ -123,10 +126,11 @@ void main() {
         .widget<CanvasView>(find.byType(CanvasView))
         .viewport;
     viewport
-      ..panBy(const Offset(40, 10))
+      ..panBy(const Offset(40, 10), const Size(100, 100))
       ..zoomAt(Offset.zero, const Size(100, 100), 2)
       ..rotateAt(Offset.zero, const Size(100, 100), 0.5);
-    final pan = viewport.pan;
+    final center = viewport.center;
+    final extent = viewport.extent;
 
     await _chooseMode(tester, 0, 'Diagnostics');
     expect(_pane, findsOneWidget);
@@ -138,8 +142,8 @@ void main() {
     final restored = tester
         .widget<CanvasView>(find.byType(CanvasView))
         .viewport;
-    expect(restored.pan, pan);
-    expect(restored.zoom, 2);
+    expect(restored.center, center);
+    expect(restored.extent, extent);
     expect(restored.rotation, closeTo(0.5, 1e-9));
   });
 
@@ -169,15 +173,16 @@ void main() {
       await _drawStroke(tester);
       expect(controller.document.strokeCount, 1);
 
-      // Splitting the Canvas pane adds a second Canvas pane (id 2) that
-      // shares the document; both it and pane 0 keep accepting strokes.
+      // Splitting the Canvas pane adds a second Canvas pane (second in tree
+      // order, so second in the Stack) that shares the document; both it and
+      // the first pane keep accepting strokes.
       await tester.tap(find.byKey(const ValueKey('frame-right-add-0')));
       await tester.pumpAndSettle();
       expect(_pane, findsOneWidget);
       expect(find.byType(CanvasView), findsNWidgets(2));
-      await _drawStroke(tester, find.byKey(const ValueKey('canvas-2')));
+      await _drawStroke(tester, find.byType(CanvasView).at(1));
       expect(controller.document.strokeCount, 2);
-      await _drawStroke(tester, find.byKey(const ValueKey('canvas-0')));
+      await _drawStroke(tester, find.byType(CanvasView).at(0));
       expect(controller.document.strokeCount, 3);
     },
   );
@@ -238,7 +243,8 @@ void main() {
     // Real changes: a stroke, new tiles, a viewport move, and more frames.
     await _drawStroke(tester);
     await _letTilesLand(tester);
-    view.viewport.panBy(const Offset(7, 3));
+    // At extent 1024 a 1024-pixel pane is 1:1, so the center moves by -delta.
+    view.viewport.panBy(const Offset(7, 3), const Size(1024, 1024));
     await tester.pump(const Duration(milliseconds: 600));
     expect(texts(), before, reason: 'frozen while paused');
 
@@ -246,8 +252,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     final after = texts();
     expect(after, isNot(before), reason: 'live again after resuming');
-    final pan = after[after.indexOf('pan') + 1];
-    expect(pan, '7.0, 3.0');
+    final center = after[after.indexOf('center') + 1];
+    expect(center, '505.0, 509.0');
   });
 
   // The expected defaults (maxInFlight 2, maxTiles 256) and slider ranges
@@ -324,7 +330,7 @@ void main() {
     },
   );
 
-  testWidgets('reset view returns pan, zoom and rotation to defaults', (
+  testWidgets('reset view returns center, extent and rotation to defaults', (
     tester,
   ) async {
     await tester.pumpWidget(const PainterApp());
@@ -333,17 +339,17 @@ void main() {
         .widget<CanvasView>(find.byType(CanvasView))
         .viewport;
     viewport
-      ..panBy(const Offset(40, 10))
+      ..panBy(const Offset(40, 10), const Size(100, 100))
       ..zoomAt(Offset.zero, const Size(100, 100), 2)
       ..rotateAt(Offset.zero, const Size(100, 100), 0.5);
-    expect(viewport.zoom, 2);
+    expect(viewport.extent, CanvasViewportController.defaultExtent / 2);
 
     final button = find.text('Reset view');
     await tester.ensureVisible(button);
     await tester.tap(button);
     await tester.pump();
-    expect(viewport.pan, Offset.zero);
-    expect(viewport.zoom, 1);
+    expect(viewport.center, CanvasViewportController.defaultCenter);
+    expect(viewport.extent, CanvasViewportController.defaultExtent);
     expect(viewport.rotation, 0);
   });
 
@@ -410,7 +416,10 @@ void main() {
     expect(copied, isNotNull);
     expect(copied, contains('painter tile cache report'));
     expect(copied, contains('document: strokes=1 points=2'));
-    expect(copied, contains('viewport: zoom=1.000'));
+    expect(
+      copied,
+      contains('viewport: center=512.0,512.0 extent=1024.0 rotation=0.000rad'),
+    );
     expect(copied, matches(RegExp(r'builds=\d+ \(full=\d+')));
     expect(find.text('Report copied to clipboard'), findsOneWidget);
   });
