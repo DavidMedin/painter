@@ -25,8 +25,10 @@ import 'package:flutter/material.dart';
 //
 // Each Canvas pane owns a `CanvasViewportController` for its view. It maps
 // between widget-local and document coordinates without changing shared
-// strokes, so panning or zooming one pane cannot move another. Viewport state
-// is transient and is not part of the saved document.
+// strokes, so panning or zooming one pane cannot move another. The view is
+// Per-mode state of its pane (docs/spec/canvas.md CNVS-6): it is not part of
+// the saved document content, but a Flash stores it in the file's workspace
+// section (docs/decisions/006-workspace-in-file.md).
 //
 // Why this split: document coordinates must not depend on the viewport
 // (design/canvas/vector-canvas.md), so panning, zooming and rotating never
@@ -387,6 +389,56 @@ class CanvasViewportController extends ChangeNotifier {
     _zoom = 1;
     _rotation = 0;
     notifyListeners();
+  }
+
+  /// Sets pan, zoom, and rotation together. [zoom] is clamped to
+  /// [minimumZoom]..[maximumZoom] like every other zoom change.
+  void setView({
+    required Offset pan,
+    required double zoom,
+    required double rotation,
+  }) {
+    _pan = pan;
+    _zoom = zoom.clamp(minimumZoom, maximumZoom).toDouble();
+    _rotation = rotation;
+    notifyListeners();
+  }
+
+  /// Returns an independent controller holding this view, so a copied pane
+  /// starts where this one is without later gestures affecting both.
+  CanvasViewportController copy() =>
+      CanvasViewportController()
+        ..setView(pan: _pan, zoom: _zoom, rotation: _rotation);
+
+  /// The view as stored in a workspace section (docs/spec/workspace.md).
+  Map<String, Object?> toJson() => {
+    'pan': {'dx': _pan.dx, 'dy': _pan.dy},
+    'zoom': _zoom,
+    'rotation': _rotation,
+  };
+
+  /// Parses a view written by [toJson]; null when any field is missing,
+  /// non-finite, or a zoom outside [minimumZoom]..[maximumZoom].
+  static CanvasViewportController? fromJson(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+    final pan = value['pan'];
+    final zoom = value['zoom'];
+    final rotation = value['rotation'];
+    if (pan is! Map<String, dynamic>) return null;
+    final dx = pan['dx'];
+    final dy = pan['dy'];
+    if (dx is! num || dy is! num || zoom is! num || rotation is! num) {
+      return null;
+    }
+    if (!dx.isFinite || !dy.isFinite || !zoom.isFinite || !rotation.isFinite) {
+      return null;
+    }
+    if (zoom < minimumZoom || zoom > maximumZoom) return null;
+    return CanvasViewportController()..setView(
+      pan: Offset(dx.toDouble(), dy.toDouble()),
+      zoom: zoom.toDouble(),
+      rotation: rotation.toDouble(),
+    );
   }
 
   /// Maps widget-local [screenPosition] to document space by undoing this

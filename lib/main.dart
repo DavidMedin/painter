@@ -27,12 +27,14 @@
 // interleave and race on _documentPath or on the controller's document.
 //
 // Open flow (_openDocument): DocumentFileService.chooseOpenPath ->
-// DocumentFileService.readDocument -> jsonDecode ->
-// CanvasDocument.fromJson (validates format identifier/version, throws
-// FormatException) -> CanvasController.replaceDocument -> reset each existing
-// Canvas pane's viewport -> remember the path. The document is replaced only
-// after every earlier step succeeded, so a failed open leaves it untouched
-// (design/document/file-format-and-flow.md).
+// DocumentFileService.readDocument -> DocumentFileContents.parse (jsonDecode,
+// then CanvasDocument.fromJson, which validates the format identifier and
+// version and throws FormatException) -> CanvasController.replaceDocument ->
+// apply the stored workspace if the setting is on and the section is usable ->
+// remember the path. The document is replaced only after every earlier step
+// succeeded, so a failed open leaves it untouched. An unusable workspace
+// section never fails the open. The current pane views are kept
+// (docs/spec/workspace.md WKSP-11).
 //
 // Save flow (_saveDocument): use the remembered path, or ask
 // DocumentFileService.chooseSavePath with the suggested name 'Untitled.paint'
@@ -49,18 +51,19 @@
 // Fatal-error classification is an open question in
 // docs/design/logging/behavior.md, so the handlers do not invent one.
 //
-// Pane system (docs/design/panes/pane-system.md and
-// docs/design/controls/manual-pane.md): PaneSystem
-// owns the split tree, content modes, focus, and resize weights. PainterApp
-// retains a renderer per pane and an independent viewport per Canvas pane.
-// Diagnostics reads a visible Canvas pane's state or uses its own retained
-// renderer and viewport. Manual panes show contextual help; the Log pane and
-// bottom status bar observe the same PainterLog history.
+// Pane system and workspace (docs/spec/panes.md, docs/spec/workspace.md):
+// Workspace (workspace/workspace.dart) owns the layout, each pane's mode, and
+// per-mode state such as a Canvas pane's viewport; PaneSystem draws it.
+// PainterApp retains a renderer per pane. Diagnostics reads the first Canvas
+// pane's state or uses its own pane's. Manual panes show contextual help; the
+// Log pane and bottom status bar observe the same PainterLog history. Opening
+// a file applies its stored workspace when the 'load stored workspaces'
+// setting is on; Flash writes the current one into the file; Save leaves the
+// file's stored workspace as it was.
 //
 // ---------------------------------------------------------------------------
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -70,6 +73,7 @@ import 'canvas/canvas_view.dart';
 import 'canvas/tiled_renderer.dart';
 import 'debug/canvas_debug_options.dart';
 import 'debug/canvas_debug_pane.dart';
+import 'document/document_file_format.dart';
 import 'document/document_file_service.dart';
 import 'help/contextual_help.dart';
 import 'help/manual_pane.dart';
@@ -81,7 +85,9 @@ import 'settings/settings_store.dart';
 import 'settings/theme_settings_pane.dart';
 import 'ui/painter_action_button.dart';
 import 'ui/pane_system.dart';
-import 'ui/touch_target_settings.dart';
+import 'ui/touch_target.dart';
+import 'workspace/pane_kind.dart';
+import 'workspace/workspace.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -140,15 +146,16 @@ class _PainterAppState extends State<PainterApp> {
       widget.fileService ?? InAppDocumentFileService();
   late final PainterSettingsController _settings;
   String? _documentPath;
+
+  /// The `workspace` value of the opened file as read or last flashed, kept so
+  /// Save writes it back unchanged (WKSP-4).
+  Object? _workspaceSection;
   bool _fileOperationInProgress = false;
 
   final CanvasDebugOptions _debugOptions = CanvasDebugOptions();
   final HelpState _helpState = HelpState();
-  final Map<int, CanvasViewportController> _viewports = {};
   final Map<int, TiledRenderer> _renderers = {};
-  final GlobalKey<PaneSystemState> _paneSystemKey =
-      GlobalKey<PaneSystemState>();
-  bool _enlargeTargets = false;
+  late final Workspace _workspace = Workspace(onPaneRemoved: _onPaneRemoved);
 
   @override
   void initState() {
@@ -161,18 +168,8 @@ class _PainterAppState extends State<PainterApp> {
     );
   }
 
-  void _toggleDebugPane() => _paneSystemKey.currentState?.toggleDiagnostics();
-
-  void _onPaneRemoved(int paneId) {
-    _renderers.remove(paneId)?.dispose();
-    _viewports.remove(paneId)?.dispose();
-  }
-
-  void _onPaneTypeChanged(int paneId, PaneKind kind) {
-    if (kind != PaneKind.canvas) {
-      _viewports.remove(paneId)?.dispose();
-    }
-  }
+  /// Releases the renderer of a pane that left the workspace.
+  void _onPaneRemoved(int paneId) => _renderers.remove(paneId)?.dispose();
 
   TiledRenderer _rendererFor(int paneId) => _renderers.putIfAbsent(
     paneId,
@@ -189,9 +186,6 @@ class _PainterAppState extends State<PainterApp> {
     ),
   );
 
-  CanvasViewportController _viewportFor(int paneId) =>
-      _viewports.putIfAbsent(paneId, CanvasViewportController.new);
-
   /// Builds pane content from its selected mode and app-owned state.
   Widget _buildPaneContent(BuildContext context, PaneDescriptor pane) {
     final paneRenderer = _rendererFor(pane.id);
@@ -199,7 +193,7 @@ class _PainterAppState extends State<PainterApp> {
       PaneKind.canvas => CanvasView(
         key: ValueKey('canvas-${pane.id}'),
         controller: _controller,
-        viewport: _viewportFor(pane.id),
+        viewport: _workspace.canvasViewport(pane.id),
         debugOptions: _debugOptions,
         renderer: paneRenderer,
       ),
@@ -209,31 +203,32 @@ class _PainterAppState extends State<PainterApp> {
         logger: _logger,
       ),
       PaneKind.manual => ManualPane(
-        helpId: pane.manualHelpId,
-        onHelpIdSelected: pane.onManualHelpSelected,
+        helpId: _workspace.manualHelpId(pane.id),
+        onHelpIdSelected: (helpId) =>
+            _workspace.setManualHelpId(pane.id, helpId),
       ),
       PaneKind.log => LogPane(log: _logger),
     };
   }
 
-  /// Builds diagnostics from the first Canvas, or this pane when none is visible.
+  /// Builds diagnostics from the first Canvas, or this pane when none exists.
   Widget _diagnosticsContent(PaneDescriptor pane, TiledRenderer paneRenderer) {
-    final canvasPaneId = pane.canvasPaneId ?? pane.id;
-    final renderer = pane.canvasPaneId == null
+    final canvasPaneId = _workspace.firstCanvasPaneId ?? pane.id;
+    final renderer = canvasPaneId == pane.id
         ? paneRenderer
         : _rendererFor(canvasPaneId);
     return CanvasDebugPane(
       key: ValueKey('diagnostics-${pane.id}'),
       renderer: renderer,
       controller: _controller,
-      viewport: _viewportFor(canvasPaneId),
+      viewport: _workspace.canvasViewport(canvasPaneId),
       options: _debugOptions,
     );
   }
 
   /// Opens the hovered or focused control's article in the docked manual.
   void _showContextHelp() {
-    _paneSystemKey.currentState?.openManual(_helpState.activeTopic);
+    _workspace.openManual(_helpState.activeTopic);
   }
 
   /// Releases app-owned settings, logger, renderers, viewports, and help state.
@@ -248,9 +243,7 @@ class _PainterAppState extends State<PainterApp> {
     _debugOptions.dispose();
     _helpState.dispose();
     _controller.dispose();
-    for (final viewport in _viewports.values) {
-      viewport.dispose();
-    }
+    _workspace.dispose();
     if (_ownsLogger) _logger.dispose();
     super.dispose();
   }
@@ -272,11 +265,12 @@ class _PainterAppState extends State<PainterApp> {
       final path = await _fileService.chooseOpenPath(context);
       if (path == null || !mounted) return;
       final contents = await _fileService.readDocument(path);
-      final document = CanvasDocument.fromJson(jsonDecode(contents));
+      final file = DocumentFileContents.parse(contents);
       if (!mounted) return;
-      _controller.replaceDocument(document);
-      for (final viewport in _viewports.values) {
-        viewport.resetViewport();
+      _controller.replaceDocument(file.document);
+      _workspaceSection = file.workspaceSection;
+      if (_settings.settings.loadStoredWorkspaces) {
+        _workspace.applyJson(file.workspaceSection);
       }
       _documentPath = path;
     } catch (error, stackTrace) {
@@ -302,13 +296,46 @@ class _PainterAppState extends State<PainterApp> {
       var path = _documentPath;
       path ??= await _fileService.chooseSavePath(context, 'Untitled.paint');
       if (path == null || !mounted) return;
-      final contents = jsonEncode(_controller.document.toJson());
+      final contents = DocumentFileContents(
+        _controller.document,
+        _workspaceSection,
+      ).encode();
       await _fileService.writeDocument(path, contents);
       if (mounted) _documentPath = path;
     } catch (error, stackTrace) {
       await _logFileOperationError('save', error, stackTrace);
       if (context.mounted) {
         await _showFileOperationError(context, 'save', error, stackTrace);
+      }
+    } finally {
+      if (mounted) setState(() => _fileOperationInProgress = false);
+    }
+  }
+
+  /// Writes the current workspace into the opened document's file (WKSP-2).
+  ///
+  /// Only the file's `workspace` section changes: the file is read, its
+  /// section replaced, and the text written back, so strokes the user has not
+  /// saved stay out of the file. Needs [_documentPath]; the Flash button is
+  /// disabled until the document has a file. Failures are reported like Open
+  /// and Save failures.
+  Future<void> _flashWorkspace(BuildContext context) async {
+    if (_fileOperationInProgress) return;
+    final path = _documentPath;
+    if (path == null) return;
+    setState(() => _fileOperationInProgress = true);
+    try {
+      final section = _workspace.toJson();
+      final text = await _fileService.readDocument(path);
+      await _fileService.writeDocument(
+        path,
+        DocumentFileContents.withWorkspaceSection(text, section),
+      );
+      _workspaceSection = section;
+    } catch (error, stackTrace) {
+      await _logFileOperationError('flash', error, stackTrace);
+      if (context.mounted) {
+        await _showFileOperationError(context, 'flash', error, stackTrace);
       }
     } finally {
       if (mounted) setState(() => _fileOperationInProgress = false);
@@ -351,7 +378,7 @@ class _PainterAppState extends State<PainterApp> {
               topic: HelpIds.dialogDetails,
               child: ExpansionTile(
                 tilePadding: EdgeInsets.zero,
-                minTileHeight: TouchTargetSettings.height(context),
+                minTileHeight: touchTargetHeight,
                 title: const Text('Details'),
                 children: [
                   SizedBox(
@@ -392,17 +419,11 @@ class _PainterAppState extends State<PainterApp> {
           themeMode: settings.mode,
           builder: (context, child) => HelpScope(
             helpState: _helpState,
-            child: TouchTargetSettings(
-              enlarged: _enlargeTargets,
-              child: CallbackShortcuts(
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.f1):
-                      _showContextHelp,
-                  const SingleActivator(LogicalKeyboardKey.f3):
-                      _toggleDebugPane,
-                },
-                child: Focus(autofocus: true, child: child!),
-              ),
+            child: CallbackShortcuts(
+              bindings: {
+                const SingleActivator(LogicalKeyboardKey.f1): _showContextHelp,
+              },
+              child: Focus(autofocus: true, child: child!),
             ),
           ),
           home: Builder(
@@ -427,11 +448,12 @@ class _PainterAppState extends State<PainterApp> {
                         : () => _saveDocument(context),
                   ),
                   PainterActionButton(
-                    icon: Icons.touch_app,
-                    label: _enlargeTargets ? 'Touch: Large' : 'Touch: Standard',
-                    topic: HelpIds.touchTargets,
-                    onPressed: () =>
-                        setState(() => _enlargeTargets = !_enlargeTargets),
+                    icon: Icons.flash_on,
+                    label: 'Flash layout',
+                    topic: HelpIds.flashWorkspace,
+                    onPressed: _fileOperationInProgress || _documentPath == null
+                        ? null
+                        : () => _flashWorkspace(context),
                   ),
                 ],
               ),
@@ -439,10 +461,8 @@ class _PainterAppState extends State<PainterApp> {
                 children: [
                   Expanded(
                     child: PaneSystem(
-                      key: _paneSystemKey,
+                      workspace: _workspace,
                       contentBuilder: _buildPaneContent,
-                      onPaneRemoved: _onPaneRemoved,
-                      onPaneTypeChanged: _onPaneTypeChanged,
                     ),
                   ),
                   LogStatusBar(log: _logger),

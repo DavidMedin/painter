@@ -11,7 +11,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../ui/touch_target_settings.dart';
+import '../ui/touch_target.dart';
 
 import 'contextual_help.dart';
 import 'manual_catalog.dart';
@@ -57,7 +57,7 @@ class ManualPane extends StatelessWidget {
                           'manual-section-${section.title}-'
                           '${section.articles.contains(helpId)}',
                         ),
-                        minTileHeight: TouchTargetSettings.height(context),
+                        minTileHeight: touchTargetHeight,
                         title: HelpTarget(
                           topic: HelpIds.manualNavigation,
                           child: Text(section.title),
@@ -72,9 +72,7 @@ class ManualPane extends StatelessWidget {
                               child: ListTile(
                                 key: ValueKey('manual-item-${id.name}'),
                                 dense: true,
-                                minTileHeight: TouchTargetSettings.height(
-                                  context,
-                                ),
+                                minTileHeight: touchTargetHeight,
                                 selected: id == helpId,
                                 selectedTileColor: Theme.of(context)
                                     .colorScheme

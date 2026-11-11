@@ -1,5 +1,6 @@
-// What: Widget tests cover theme selection, custom palettes, and the app route
-//   into Settings through the Pane Mode selector.
+// What: Widget tests cover theme selection, custom palettes, the Load stored
+//   workspaces switch, and the app route into Settings through the Pane Mode
+//   selector.
 // Why: Both the settings pane and its integration into the pane workspace must
 //   update the visible app behavior and persistent settings model.
 // Coupled to: main.dart, settings/painter_settings.dart,
@@ -80,6 +81,28 @@ void main() {
     expect(controller.settings.mode, ThemeMode.light);
     expect(persisted, hasLength(1));
     expect(persisted.single.mode, ThemeMode.light);
+  });
+
+  testWidgets('Load stored workspaces switch updates and persists settings', (
+    tester,
+  ) async {
+    final persisted = <PainterSettings>[];
+    final controller = PainterSettingsController(
+      persist: (settings) async => persisted.add(settings),
+    );
+    await _pumpSettingsPane(tester, controller);
+    final toggle = find.byKey(const ValueKey('load-stored-workspaces'));
+
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+    expect(find.text('Load stored workspaces'), findsOneWidget);
+
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    expect(controller.settings.loadStoredWorkspaces, isFalse);
+    expect(persisted.single.loadStoredWorkspaces, isFalse);
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
   });
 
   testWidgets('creates a selected custom palette with edited colors', (

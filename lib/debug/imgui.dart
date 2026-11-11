@@ -50,7 +50,7 @@ import 'package:flutter/services.dart';
 import '../help/contextual_help.dart';
 import '../settings/painter_settings.dart';
 import '../ui/painter_action_button.dart';
-import '../ui/touch_target_settings.dart';
+import '../ui/touch_target.dart';
 
 /// Theme-driven colors and the compact typography of the diagnostics kit.
 class ImTheme {
@@ -152,7 +152,7 @@ class _ImSectionState extends State<ImSection> {
                 child: InkWell(
                   onTap: () => setState(() => _open = !_open),
                   child: Container(
-                    height: TouchTargetSettings.height(context),
+                    height: touchTargetHeight,
                     margin: const EdgeInsets.only(top: 3),
                     color: _hover
                         ? ImTheme.headerHover(context)
@@ -305,7 +305,7 @@ class _ImCheckboxState extends State<ImCheckbox> {
             child: InkWell(
               onTap: () => widget.onChanged(!widget.value),
               child: SizedBox(
-                height: TouchTargetSettings.height(context),
+                height: touchTargetHeight,
                 child: Row(
                   children: [
                     Container(
@@ -415,7 +415,7 @@ class _ImSliderIntState extends State<ImSliderInt> {
   Widget build(BuildContext context) {
     final value = widget.value.clamp(widget.min, widget.max);
     final span = math.max(1, widget.max - widget.min);
-    final targetHeight = TouchTargetSettings.height(context);
+    final targetHeight = touchTargetHeight;
     return HelpTarget(
       topic: HelpIds.debugSlider,
       child: Focus(

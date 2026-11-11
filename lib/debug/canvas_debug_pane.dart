@@ -14,7 +14,7 @@
 // OVERVIEW: the debug pane
 // ---------------------------------------------------------------------------
 // What it is: a docked tool pane, shown when a pane's content selector chooses
-//   Diagnostics or when F3 adds a diagnostics pane beside the canvas. It shows
+//   Diagnostics. It shows
 //   how the tiled texture cache (design/canvas/tile-cache.md) is behaving:
 //   which level of detail is drawn, how every visible tile was drawn (current,
 //   stale, coarser/finer fallback, missing, blank), cache occupancy, build

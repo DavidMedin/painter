@@ -20,7 +20,8 @@ enum HelpId {
   themeColor,
   paneBoundary,
   logEntryDetails,
-  touchTargets,
+  loadStoredWorkspaces,
+  flashWorkspace,
   pickerUp,
   pickerDirectory,
   pickerFile,
@@ -53,7 +54,8 @@ abstract final class HelpIds {
   static const paneBoundary = HelpId.paneBoundary;
   static const editTheme = HelpId.editTheme;
   static const themeColor = HelpId.themeColor;
-  static const touchTargets = HelpId.touchTargets;
+  static const loadStoredWorkspaces = HelpId.loadStoredWorkspaces;
+  static const flashWorkspace = HelpId.flashWorkspace;
   static const pickerUp = HelpId.pickerUp;
   static const pickerDirectory = HelpId.pickerDirectory;
   static const pickerFile = HelpId.pickerFile;
@@ -110,7 +112,7 @@ class ManualCatalog {
       section: 'Getting started',
       content:
           'Use the pane mode selector to choose Canvas, Diagnostics, Settings, '
-          'or Manual. Hover a control and press F1 to open its manual page. '
+          'Manual, or Log. Hover a control and press F1 to open its manual page. '
           'The manual navigation tree stays beside the article so you can '
           'browse related topics.',
     ),
@@ -218,13 +220,26 @@ class ManualCatalog {
     HelpId.paneBoundary: ManualArticle(
       id: HelpId.paneBoundary,
       title: 'Pane layout',
-      tooltip: 'Split, resize, or close panes',
+      tooltip: 'Add, join, swap, or resize panes',
       section: 'Workspace',
       content:
-          'Use Split to divide a pane side-by-side or top-and-bottom. Drag a '
-          'divider to resize its two child panes, or right-click it to split '
-          'or close an adjacent pane. Close removes a pane; the final pane '
-          'cannot be closed.',
+          'Each pane edge has a toolbar. Add splits the pane and puts a copy '
+          'of it against that edge. Join removes the pane across the edge and '
+          'extends this pane over it. Swap exchanges the modes of the two '
+          'panes. Join and swap need exactly one pane sharing the whole '
+          'edge. Drag a splitter to resize the panes it borders; a pane '
+          'cannot be made smaller than 100 pixels.',
+    ),
+    HelpId.flashWorkspace: ManualArticle(
+      id: HelpId.flashWorkspace,
+      title: 'Flash layout',
+      tooltip: 'Write the current pane layout into the document file',
+      section: 'Workspace',
+      content:
+          'Saving never changes the layout stored in a file. Flash writes the '
+          'current pane layout, including each canvas view, into the opened '
+          'document file without touching its strokes. Open and Save first '
+          'so the document has a file.',
     ),
     HelpId.logEntryDetails: ManualArticle(
       id: HelpId.logEntryDetails,
@@ -281,15 +296,15 @@ class ManualCatalog {
           'Enter an opaque RGB color as six hexadecimal digits, with or '
           'without a leading #. The preview updates to the parsed color.',
     ),
-    HelpId.touchTargets: ManualArticle(
-      id: HelpId.touchTargets,
-      title: 'Touch target size',
-      tooltip: 'Increase control size for touch use',
+    HelpId.loadStoredWorkspaces: ManualArticle(
+      id: HelpId.loadStoredWorkspaces,
+      title: 'Load stored workspaces',
+      tooltip: 'Apply the pane layout saved in a file when opening it',
       section: 'Appearance',
       content:
-          'Switch between standard 48-pixel and enlarged 56-pixel '
-          'interactive targets. The setting changes control hit areas '
-          'without changing the document or painting.',
+          'When on, opening a document applies the pane layout stored in its '
+          'file. When off, the file’s stored layout is ignored and the '
+          'current layout stays; the stored layout is kept in the file.',
     ),
     HelpId.dialogClose: ManualArticle(
       id: HelpId.dialogClose,
@@ -384,7 +399,7 @@ class ManualCatalog {
     ),
     ManualSection(
       title: 'Workspace',
-      articles: [HelpId.paneMode, HelpId.paneBoundary],
+      articles: [HelpId.paneMode, HelpId.paneBoundary, HelpId.flashWorkspace],
     ),
     ManualSection(
       title: 'Appearance',
@@ -394,7 +409,7 @@ class ManualCatalog {
         HelpId.createTheme,
         HelpId.editTheme,
         HelpId.themeColor,
-        HelpId.touchTargets,
+        HelpId.loadStoredWorkspaces,
       ],
     ),
     ManualSection(

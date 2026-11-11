@@ -1,18 +1,18 @@
 // What: PainterActionButton, the shared rendering for labeled, icon-bearing
 //   actions.
 // Why: docs/design/controls/behavior.md requires visible button affordance,
-//   concise hover hints, and touch-configurable sizing. One component keeps
-//   those behaviors
-//   consistent across the app shell, file picker, and developer controls.
+//   concise hover hints, and finger-sized targets. One component keeps those
+//   behaviors consistent across the app shell, file picker, and developer
+//   controls.
 // Coupled to: contextual_help.dart (tooltip and help topic),
-//   touch_target_settings.dart (minimum hit-target height), and callers in
+//   touch_target.dart (minimum hit-target height), and callers in
 //   lib/debug/ and lib/document/.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 
 import '../help/contextual_help.dart';
-import 'touch_target_settings.dart';
+import 'touch_target.dart';
 
 /// A tactile action with a leading icon, visible label, hover hint, and help.
 class PainterActionButton extends StatefulWidget {
@@ -49,7 +49,7 @@ class _PainterActionButtonState extends State<PainterActionButton> {
         widget.background ?? Theme.of(context).colorScheme.primary;
     final foreground =
         widget.foreground ?? Theme.of(context).colorScheme.onPrimary;
-    final height = widget.minimumHeight ?? TouchTargetSettings.height(context);
+    final height = widget.minimumHeight ?? touchTargetHeight;
     final radius = BorderRadius.circular(4);
 
     return HelpTarget(

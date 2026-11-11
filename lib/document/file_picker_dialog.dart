@@ -20,7 +20,7 @@ import 'package:flutter/material.dart';
 
 import '../help/contextual_help.dart';
 import '../ui/painter_action_button.dart';
-import '../ui/touch_target_settings.dart';
+import '../ui/touch_target.dart';
 
 /// Whether an [InAppFilePicker] is choosing a file to open or a path to
 /// save to.
@@ -235,8 +235,8 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
                             ? HelpIds.pickerSaveFile
                             : HelpIds.pickerFile;
                         return ConstrainedBox(
-                          constraints: BoxConstraints(
-                            minHeight: TouchTargetSettings.height(context),
+                          constraints: const BoxConstraints(
+                            minHeight: touchTargetHeight,
                           ),
                           child: HelpTarget(
                             topic: topic,

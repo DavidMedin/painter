@@ -1,5 +1,5 @@
-// What: The Settings pane's theme mode, light/dark palette selectors, and
-//   custom palette editor.
+// What: The Settings pane's theme mode, light/dark palette selectors, custom
+//   palette editor, and workspace-loading switch.
 // Why: Theme configuration belongs beside the selectable Canvas and Diagnostics
 //   panes; it edits PainterSettings through the shared controller and leaves
 //   persistence and app-wide ThemeData ownership to the app shell.
@@ -14,10 +14,10 @@ import 'package:flutter/widget_previews.dart';
 import '../help/contextual_help.dart';
 import '../ui/painter_action_button.dart';
 import '../logging/painter_log.dart';
-import '../ui/touch_target_settings.dart';
+import '../ui/touch_target.dart';
 import 'painter_settings.dart';
 
-/// The sole Settings-pane section: application theme appearance.
+/// The Settings pane: application theme appearance and workspace loading.
 class ThemeSettingsPane extends StatefulWidget {
   const ThemeSettingsPane({
     super.key,
@@ -36,10 +36,14 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
 
   /// Saves an immutable change and logs persistence failures independently
   /// of whether this pane is still mounted.
-  Future<void> _save(PainterSettings settings) async {
+  Future<void> _save(PainterSettings settings) =>
+      _persist(() => widget.controller.update(settings));
+
+  /// Runs a controller write, reporting success or failure in the notice line.
+  Future<void> _persist(Future<void> Function() write) async {
     setState(() => _notice = null);
     try {
-      await widget.controller.update(settings);
+      await write();
       if (mounted) setState(() => _notice = 'Settings saved');
     } catch (error, stackTrace) {
       await widget.logger.error(
@@ -131,7 +135,7 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                     child: DropdownButtonFormField<ThemeMode>(
                       key: const ValueKey('theme-mode'),
                       initialValue: settings.mode,
-                      itemHeight: TouchTargetSettings.height(context),
+                      itemHeight: touchTargetHeight,
                       decoration: const InputDecoration(labelText: 'Mode'),
                       items: [
                         DropdownMenuItem(
@@ -181,6 +185,28 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                     onEdit: (base) =>
                         _editTheme(context, Brightness.dark, base),
                   ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Workspace',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  HelpTarget(
+                    topic: HelpIds.loadStoredWorkspaces,
+                    child: SwitchListTile(
+                      key: const ValueKey('load-stored-workspaces'),
+                      contentPadding: EdgeInsets.zero,
+                      minTileHeight: touchTargetHeight,
+                      title: const Text('Load stored workspaces'),
+                      value: settings.loadStoredWorkspaces,
+                      onChanged: (value) => unawaited(
+                        _persist(
+                          () =>
+                              widget.controller.setLoadStoredWorkspaces(value),
+                        ),
+                      ),
+                    ),
+                  ),
                   if (_notice != null) ...[
                     const SizedBox(height: 12),
                     Text(_notice!, key: const ValueKey('settings-notice')),
@@ -223,7 +249,7 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
                   key: ValueKey('theme-select-${brightness.name}'),
                   isExpanded: true,
                   initialValue: selectedId,
-                  itemHeight: TouchTargetSettings.height(context),
+                  itemHeight: touchTargetHeight,
                   decoration: InputDecoration(labelText: label),
                   items: [
                     for (final theme in themes)

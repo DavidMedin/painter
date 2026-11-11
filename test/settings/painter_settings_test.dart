@@ -1,7 +1,10 @@
 // What: Unit coverage for palette serialization, legacy keys, brightness
-//   selection, malformed data, and preference-store round trips.
+//   selection, malformed data, the loadStoredWorkspaces flag, and
+//   preference-store round trips.
 // Why: Saved custom themes must remain loadable while current themes omit the
 //   removed canvas-paper role and retain independent light/dark palettes.
+
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -72,6 +75,41 @@ void main() {
       },
     );
 
+    test('loadStoredWorkspaces defaults to true and round-trips JSON', () {
+      expect(PainterSettings.defaults.loadStoredWorkspaces, isTrue);
+
+      final off = PainterSettings.defaults.copyWith(
+        loadStoredWorkspaces: false,
+      );
+      expect(off.toJson()['loadStoredWorkspaces'], isFalse);
+      expect(
+        PainterSettings.fromJson(off.toJson()).loadStoredWorkspaces,
+        isFalse,
+      );
+      expect(off.copyWith(mode: ThemeMode.dark).loadStoredWorkspaces, isFalse);
+    });
+
+    test('legacy and malformed loadStoredWorkspaces read as true', () {
+      final legacy = Map<String, dynamic>.of(PainterSettings.defaults.toJson())
+        ..remove('loadStoredWorkspaces');
+      final malformed = {...legacy, 'loadStoredWorkspaces': 'no'};
+
+      expect(PainterSettings.fromJson(legacy).loadStoredWorkspaces, isTrue);
+      expect(PainterSettings.fromJson(malformed).loadStoredWorkspaces, isTrue);
+    });
+
+    test('controller toggles loadStoredWorkspaces and persists it', () async {
+      final persisted = <PainterSettings>[];
+      final controller = PainterSettingsController(
+        persist: (settings) async => persisted.add(settings),
+      );
+
+      await controller.setLoadStoredWorkspaces(false);
+
+      expect(controller.settings.loadStoredWorkspaces, isFalse);
+      expect(persisted.single.loadStoredWorkspaces, isFalse);
+    });
+
     test('builds Material and semantic status colors from the palette', () {
       final theme = PainterSettings.gruvboxLight.themeData;
       final colors = theme.extension<PainterThemeColors>()!;
@@ -102,6 +140,25 @@ void main() {
 
       expect((await store.load()).toJson(), settings.toJson());
     });
+
+    test(
+      'persists loadStoredWorkspaces and loads a legacy record as true',
+      () async {
+        final store = SharedPreferencesPainterSettingsStore();
+        SharedPreferences.setMockInitialValues({});
+        await store.save(
+          PainterSettings.defaults.copyWith(loadStoredWorkspaces: false),
+        );
+        expect((await store.load()).loadStoredWorkspaces, isFalse);
+
+        final legacy = Map<String, Object>.of(PainterSettings.defaults.toJson())
+          ..remove('loadStoredWorkspaces');
+        SharedPreferences.setMockInitialValues({
+          'painter.settings.v1': jsonEncode(legacy),
+        });
+        expect((await store.load()).loadStoredWorkspaces, isTrue);
+      },
+    );
 
     test('falls back to defaults for malformed preference JSON', () async {
       SharedPreferences.setMockInitialValues({

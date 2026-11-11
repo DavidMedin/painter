@@ -1,4 +1,5 @@
-// What: Widget tests for the latest-entry bar, chronological Log pane, and app route.
+// What: Widget tests for the latest-entry bar, chronological Log pane, and app
+//   route.
 // Why: The shared log history must stay visible at the bottom of the shell and
 //   selectable pane, with the newest record at the scroll bottom.
 // Covers: lib/logging/log_widgets.dart and lib/main.dart Log-pane wiring.
@@ -8,11 +9,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/help/contextual_help.dart';
 import 'package:painter/help/manual_catalog.dart';
-import 'package:painter/ui/touch_target_settings.dart';
 import 'package:painter/logging/log_widgets.dart';
 import 'package:painter/logging/painter_log.dart';
 import 'package:painter/main.dart';
-import 'package:painter/ui/pane_system.dart';
+import 'package:painter/workspace/pane_kind.dart';
 
 void main() {
   testWidgets('status bar updates when a later record arrives', (tester) async {
@@ -82,7 +82,7 @@ void main() {
     expect(find.text('[entry.0]'), findsNothing);
   });
 
-  testWidgets('Log records provide help and enlarged hit targets', (
+  testWidgets('Log records provide help and 48-pixel-tall rows', (
     tester,
   ) async {
     final log = PainterLog.memory();
@@ -99,12 +99,9 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: TouchTargetSettings(
-            enlarged: true,
-            child: HelpScope(
-              helpState: helpState,
-              child: LogPane(log: log),
-            ),
+          body: HelpScope(
+            helpState: helpState,
+            child: LogPane(log: log),
           ),
         ),
       ),
@@ -112,7 +109,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final record = find.byType(ExpansionTile);
-    expect(tester.getSize(record).height, greaterThanOrEqualTo(56));
+    expect(tester.getSize(record).height, greaterThanOrEqualTo(48));
     final tooltip = tester.widget<Tooltip>(
       find.ancestor(of: record, matching: find.byType(Tooltip)).first,
     );

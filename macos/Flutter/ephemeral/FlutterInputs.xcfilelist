@@ -283,6 +283,7 @@
 /Users/medindj1/small-projects/painter/lib/debug/canvas_debug_pane.dart
 /Users/medindj1/small-projects/painter/lib/debug/imgui.dart
 /Users/medindj1/small-projects/painter/lib/debug/tile_overlay.dart
+/Users/medindj1/small-projects/painter/lib/document/document_file_format.dart
 /Users/medindj1/small-projects/painter/lib/document/document_file_service.dart
 /Users/medindj1/small-projects/painter/lib/document/file_picker_dialog.dart
 /Users/medindj1/small-projects/painter/lib/help/contextual_help.dart
@@ -298,7 +299,10 @@
 /Users/medindj1/small-projects/painter/lib/settings/theme_settings_pane.dart
 /Users/medindj1/small-projects/painter/lib/ui/painter_action_button.dart
 /Users/medindj1/small-projects/painter/lib/ui/pane_system.dart
-/Users/medindj1/small-projects/painter/lib/ui/touch_target_settings.dart
+/Users/medindj1/small-projects/painter/lib/ui/touch_target.dart
+/Users/medindj1/small-projects/painter/lib/workspace/pane_kind.dart
+/Users/medindj1/small-projects/painter/lib/workspace/pane_layout.dart
+/Users/medindj1/small-projects/painter/lib/workspace/workspace.dart
 /Users/medindj1/small-projects/painter/pubspec.yaml
 /opt/homebrew/share/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf
 /opt/homebrew/share/flutter/bin/cache/engine.stamp

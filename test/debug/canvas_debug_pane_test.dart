@@ -3,15 +3,16 @@
 //   tile cache, canvas controller and CanvasDebugOptions; plus two plain unit
 //   tests on CanvasDebugOptions and the tile-draw colors.
 // Why: The pane (design/diagnostics/debug-pane.md) is the only way to observe
-// the asynchronous tile
-//   cache in the app. A readout that lies or a control that does nothing defeats
-//   its purpose. Tests also cover pause freezing every readout.
+//   the asynchronous tile cache in the app. A readout that lies or a control
+//   that does nothing defeats its purpose. Tests also cover pause freezing
+//   every readout and that a pane's canvas view survives a mode round trip.
 // Covers: lib/debug/canvas_debug_pane.dart, lib/debug/canvas_debug_options.dart,
-//   lib/debug/tile_overlay.dart, and lib/main.dart pane/F3 wiring.
+//   lib/debug/tile_overlay.dart, and lib/main.dart pane-mode wiring.
 //
 // Overview: the pane is pure presentation over live renderer/controller state.
-// The tests pump PainterApp, open diagnostics with F3, draw synthetic strokes,
-// and compare visible values with TileCache, CanvasController and options.
+// The tests pump PainterApp, dock Diagnostics beside the Canvas through the
+// pane frame's add button and mode dropdown, draw synthetic strokes, and
+// compare visible values with TileCache, CanvasController and options.
 // Tile builds require real asynchronous time (see _letTilesLand). Layout uses
 // the Ahem test font.
 //
@@ -53,11 +54,27 @@ String _row(WidgetTester tester, String label) {
   return value.value;
 }
 
-/// Draws one short mouse stroke well inside the Canvas pane with synthetic
-/// mouse events through the binding, like the canvas tests.
-Future<void> _drawStroke(WidgetTester tester) async {
-  final canvas = find.byType(CanvasView);
-  final rect = tester.getRect(canvas);
+/// Selects [label] in the mode dropdown of pane [paneId].
+Future<void> _chooseMode(WidgetTester tester, int paneId, String label) async {
+  await tester.tap(find.byKey(ValueKey('pane-mode-$paneId')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label).last);
+  await tester.pumpAndSettle();
+}
+
+/// Docks a Diagnostics pane (id 1) right of the Canvas pane (id 0): adds a
+/// pane on pane 0's right edge, then switches the new pane to Diagnostics.
+Future<void> _openDiagnostics(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('frame-right-add-0')));
+  await tester.pumpAndSettle();
+  await _chooseMode(tester, 1, 'Diagnostics');
+}
+
+/// Draws one short mouse stroke well inside a Canvas pane ([canvas], default
+/// the only CanvasView) with synthetic mouse events through the binding, like
+/// the canvas tests.
+Future<void> _drawStroke(WidgetTester tester, [Finder? canvas]) async {
+  final rect = tester.getRect(canvas ?? find.byType(CanvasView));
   final start = Offset(rect.left + rect.width * 0.65, rect.center.dy);
   final mouse = TestPointer(1, PointerDeviceKind.mouse);
   await tester.sendEventToBinding(
@@ -98,54 +115,53 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
-  // The app starts with one Canvas. F3 turns a sole Diagnostics pane back
-  // into Canvas; otherwise it adds or removes a docked neighbor.
-  testWidgets('pane selector and F3 toggle docked diagnostics', (tester) async {
+  testWidgets('a pane keeps its canvas view across a Diagnostics round trip', (
+    tester,
+  ) async {
     await tester.pumpWidget(const PainterApp());
+    final viewport = tester
+        .widget<CanvasView>(find.byType(CanvasView))
+        .viewport;
+    viewport
+      ..panBy(const Offset(40, 10))
+      ..zoomAt(Offset.zero, const Size(100, 100), 2)
+      ..rotateAt(Offset.zero, const Size(100, 100), 0.5);
+    final pan = viewport.pan;
 
-    await tester.tap(find.text('Canvas').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Diagnostics').last);
-    await tester.pumpAndSettle();
+    await _chooseMode(tester, 0, 'Diagnostics');
     expect(_pane, findsOneWidget);
     expect(find.byType(CanvasView), findsNothing);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _chooseMode(tester, 0, 'Canvas');
     expect(_pane, findsNothing);
     expect(find.byType(CanvasView), findsOneWidget);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
-    expect(_pane, findsOneWidget);
-    expect(find.byType(CanvasView), findsOneWidget);
-
-    await tester.tap(find.text('Close').last);
-    await tester.pump();
-    expect(_pane, findsNothing);
+    final restored = tester
+        .widget<CanvasView>(find.byType(CanvasView))
+        .viewport;
+    expect(restored.pan, pan);
+    expect(restored.zoom, 2);
+    expect(restored.rotation, closeTo(0.5, 1e-9));
   });
 
-  testWidgets('touch setting enlarges diagnostics controls', (tester) async {
+  testWidgets('diagnostics controls are at least 48 px tall', (tester) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
 
-    final checkbox = find.byType(ImCheckbox).first;
-    await tester.ensureVisible(checkbox);
-    await tester.pump();
-    expect(tester.getSize(checkbox).height, 48);
-
-    await tester.tap(find.text('Touch: Standard'));
-    await tester.pump();
-    expect(tester.getSize(checkbox).height, 56);
+    for (final control in [
+      find.byType(ImCheckbox).first,
+      find.byType(ImSliderInt).first,
+    ]) {
+      await tester.ensureVisible(control);
+      await tester.pump();
+      expect(tester.getSize(control).height, greaterThanOrEqualTo(48));
+    }
   });
 
   testWidgets(
-    'drawing still works with docked diagnostics and split controls',
+    'drawing still works with docked diagnostics and a split canvas',
     (tester) async {
       await tester.pumpWidget(const PainterApp());
-      await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-      await tester.pump();
+      await _openDiagnostics(tester);
       final controller = tester
           .widget<CanvasView>(find.byType(CanvasView))
           .controller;
@@ -153,14 +169,16 @@ void main() {
       await _drawStroke(tester);
       expect(controller.document.strokeCount, 1);
 
-      await tester.tap(find.byKey(const ValueKey('split-menu-0')));
+      // Splitting the Canvas pane adds a second Canvas pane (id 2) that
+      // shares the document; both it and pane 0 keep accepting strokes.
+      await tester.tap(find.byKey(const ValueKey('frame-right-add-0')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Side by side'));
-      await tester.pumpAndSettle();
-      expect(_pane, findsNWidgets(2));
-      expect(find.byType(CanvasView), findsOneWidget);
-      await _drawStroke(tester);
+      expect(_pane, findsOneWidget);
+      expect(find.byType(CanvasView), findsNWidgets(2));
+      await _drawStroke(tester, find.byKey(const ValueKey('canvas-2')));
       expect(controller.document.strokeCount, 2);
+      await _drawStroke(tester, find.byKey(const ValueKey('canvas-0')));
+      expect(controller.document.strokeCount, 3);
     },
   );
 
@@ -171,8 +189,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
 
     final header = find.text('Document and splats');
     await tester.ensureVisible(header);
@@ -199,8 +216,7 @@ void main() {
   // options.paused after each tap so a missed tap cannot pass vacuously.
   testWidgets('pause freezes the readouts until resumed', (tester) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
     final view = tester.widget<CanvasView>(find.byType(CanvasView));
     final options = view.debugOptions!;
 
@@ -239,8 +255,7 @@ void main() {
   // this test must change with them.
   testWidgets('sliders change the real cache limits', (tester) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
     final cache = _rendererOf(tester).cache;
     expect(cache.maxInFlight, 2);
     expect(cache.maxTiles, 256);
@@ -280,8 +295,7 @@ void main() {
     'discard-all drops every built tile and rebuilds from the document',
     (tester) async {
       await tester.pumpWidget(const PainterApp());
-      await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-      await tester.pump();
+      await _openDiagnostics(tester);
       await _drawStroke(tester);
       await _letTilesLand(tester);
       final cache = _rendererOf(tester).cache;
@@ -314,8 +328,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
     final viewport = tester
         .widget<CanvasView>(find.byType(CanvasView))
         .viewport;
@@ -338,8 +351,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
     final options = tester
         .widget<CanvasView>(find.byType(CanvasView))
         .debugOptions!;
@@ -386,8 +398,7 @@ void main() {
     );
 
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
     await _drawStroke(tester);
     await _letTilesLand(tester);
 
@@ -408,12 +419,13 @@ void main() {
   // test harness fails a test that ends with a pending timer.
   testWidgets('the pane stops its refresh timer when closed', (tester) async {
     await tester.pumpWidget(const PainterApp());
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
-    await tester.pump();
+    await _openDiagnostics(tester);
+    // Joining pane 0 over its right neighbor removes the Diagnostics pane.
+    await tester.tap(find.byKey(const ValueKey('frame-right-join-0')));
+    await tester.pumpAndSettle();
     // A leaked periodic timer would fail the end-of-test pending-timer check.
     expect(_pane, findsNothing);
+    expect(find.byType(CanvasView), findsOneWidget);
   });
 
   test('CanvasDebugOptions notifies only on real changes', () {

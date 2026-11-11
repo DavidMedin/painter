@@ -12,8 +12,9 @@
 // PainterThemeColors carries diagnostic status colors that Material does not
 // define. Canvas paper is fixed by CanvasView and independent from app theme.
 // Gruvbox Light and Gruvbox Dark are built-in and cannot be overwritten.
-// PainterSettings stores system/light/dark mode, selected palette IDs, and saved
-// custom palettes. Settings are serialized by settings_store.dart, while
+// PainterSettings stores system/light/dark mode, selected palette IDs, saved
+// custom palettes, and whether opening a document applies its stored workspace.
+// Settings are serialized by settings_store.dart, while
 // PainterSettingsController notifies the app shell and invokes its persistence
 // callback.
 //
@@ -284,6 +285,7 @@ class PainterSettings {
     required this.lightThemeId,
     required this.darkThemeId,
     this.customThemes = const [],
+    this.loadStoredWorkspaces = true,
   });
 
   static const gruvboxLight = PainterTheme(
@@ -339,6 +341,9 @@ class PainterSettings {
   final String darkThemeId;
   final List<PainterTheme> customThemes;
 
+  /// Whether opening a document applies the pane layout stored in the file.
+  final bool loadStoredWorkspaces;
+
   /// Resolves the selected theme for the requested brightness.
   PainterTheme themeFor(Brightness brightness) {
     final id = brightness == Brightness.light ? lightThemeId : darkThemeId;
@@ -365,11 +370,13 @@ class PainterSettings {
     String? lightThemeId,
     String? darkThemeId,
     List<PainterTheme>? customThemes,
+    bool? loadStoredWorkspaces,
   }) => PainterSettings(
     mode: mode ?? this.mode,
     lightThemeId: lightThemeId ?? this.lightThemeId,
     darkThemeId: darkThemeId ?? this.darkThemeId,
     customThemes: customThemes ?? this.customThemes,
+    loadStoredWorkspaces: loadStoredWorkspaces ?? this.loadStoredWorkspaces,
   );
 
   /// Converts app settings to JSON-compatible data.
@@ -378,6 +385,7 @@ class PainterSettings {
     'lightThemeId': lightThemeId,
     'darkThemeId': darkThemeId,
     'customThemes': customThemes.map((theme) => theme.toJson()).toList(),
+    'loadStoredWorkspaces': loadStoredWorkspaces,
   };
 
   /// Restores preferences and custom themes, defaulting malformed records.
@@ -412,6 +420,9 @@ class PainterSettings {
           ? value['darkThemeId'] as String
           : defaults.darkThemeId,
       customThemes: List.unmodifiable(customThemes),
+      loadStoredWorkspaces: value['loadStoredWorkspaces'] is bool
+          ? value['loadStoredWorkspaces'] as bool
+          : defaults.loadStoredWorkspaces,
     );
     return settings.copyWith(
       lightThemeId: settings.themeFor(Brightness.light).id,
@@ -438,4 +449,9 @@ class PainterSettingsController extends ChangeNotifier {
     notifyListeners();
     await persist?.call(settings);
   }
+
+  /// Changes [PainterSettings.loadStoredWorkspaces], notifying and persisting
+  /// like [update].
+  Future<void> setLoadStoredWorkspaces(bool value) =>
+      update(_settings.copyWith(loadStoredWorkspaces: value));
 }

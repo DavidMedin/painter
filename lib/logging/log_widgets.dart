@@ -9,7 +9,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../help/contextual_help.dart';
-import '../ui/touch_target_settings.dart';
+import '../ui/touch_target.dart';
 
 import 'painter_log.dart';
 
@@ -130,7 +130,7 @@ class _LogPaneState extends State<LogPane> {
           topic: HelpIds.logEntryDetails,
           child: ExpansionTile(
             key: ValueKey('log-entry-${entry.timestamp}-$index'),
-            minTileHeight: TouchTargetSettings.height(context),
+            minTileHeight: touchTargetHeight,
             leading: Icon(Icons.circle, size: 10, color: color),
             title: Text(entry.message),
             subtitle: Text(
