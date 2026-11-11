@@ -7,6 +7,8 @@
 .DS_Store
 .atom/
 .build/
+build/
+.dart_tool/
 .buildlog/
 .history
 .svn/
