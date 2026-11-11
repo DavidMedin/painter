@@ -2,7 +2,7 @@
 // Why: Log records store stable ids and arguments rather than prose so wording
 //   changes and future translations do not require rewriting the log history.
 // Coupled to: painter_log.dart (record ids), log_widgets.dart (presentation),
-//   and docs/design/logging/file-backed-logging.md.
+//   docs/spec/logging.md, and docs/decisions/014-logging.md (id rules).
 
 /// Templates for user-facing log messages, keyed by stable record id.
 abstract final class LogMessages {

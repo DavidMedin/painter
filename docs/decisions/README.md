@@ -15,3 +15,4 @@
 | [011](011-relative-canvas-view.md) | A canvas view is stored as a center, an extent across the pane's shorter side, and a rotation | accepted |
 | [012](012-undo-per-participant.md) | Undo replays inverse actions on the shared document, per Participant | accepted |
 | [013](013-session-networking.md) | Participants connect in a full mesh of WebSockets and run Automerge sync on each connection | accepted |
+| [014](014-logging.md) | Every Operation, edit, and handled failure is logged through the one PainterLog, with catalog message ids | accepted |

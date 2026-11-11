@@ -188,7 +188,7 @@ class TileCache extends ChangeNotifier {
   final SplatWorker _worker;
 
   /// Reports worker failures to the app's shared persistent logger, as
-  /// specified in `docs/design/logging/file-backed-logging.md`.
+  /// `docs/decisions/014-logging.md` requires.
   final void Function(Object error, StackTrace stackTrace)? onSplatWorkerError;
 
   /// Tile keys whose splat generation failed; retried after a cache revision

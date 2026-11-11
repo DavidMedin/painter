@@ -12,7 +12,6 @@ spec/<capability>.md          # one file per capability, kebab-case name
 decisions/NNN-<slug>.md       # NNN = zero-padded 3-digit sequence number
 decisions/README.md           # index of all decisions
 plan.md
-open-questions.md
 AGENTS.md
 ```
 
@@ -83,14 +82,7 @@ Requirement format:
   are deleted.
 - **[review]** Each criterion can be verified by running the system.
 
-## 6. Open questions (`open-questions.md`)
-
-- **[check]** Each entry has an ID matching `^Q-\d+$`, a question, and an
-  `Affects:` line naming spec or decision IDs that exist.
-- **[check]** A question that appears in a spec's `Open questions` section
-  also has a `Q-` entry here.
-
-## 7. Cross-document rules
+## 6. Cross-document rules
 
 - **[check]** Every requirement ID in `spec/` is cited by at least one
   test, or appears in a `plan.md` item. An uncited ID is reported.
@@ -102,7 +94,7 @@ Requirement format:
 - **[review]** Text outside `decisions/` never explains why a choice was made.
   Text outside `spec/` never defines required behavior.
 
-## 8. Agent check procedure
+## 7. Agent check procedure
 
 1. Run all **[check]** rules and report each failure as
    `<file>:<line> <rule section> <message>`.
