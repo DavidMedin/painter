@@ -216,8 +216,9 @@ void main() {
 
   // Regression (docs/design/diagnostics/debug-pane.md, Regression Notes): the pane used to mix frozen and live reads,
   // so Pause did not actually freeze every readout and the report could
-  // disagree with the screen. The test compares every Text widget while
-  // paused after a stroke, new tiles, a pan and more frames. It also checks
+  // disagree with the screen. The test compares every Text widget in the
+  // pane while paused after a stroke, new tiles, a pan and more frames; the
+  // status bar outside it shows the stroke's log record. It also checks
   // options.paused after each tap so a missed tap cannot pass vacuously.
   testWidgets('pause freezes the readouts until resumed', (tester) async {
     await tester.pumpWidget(const PainterApp());
@@ -234,8 +235,12 @@ void main() {
       expect(options.paused, paused);
     }
 
-    List<String?> texts() =>
-        tester.widgetList<Text>(find.byType(Text)).map((t) => t.data).toList();
+    List<String?> texts() => tester
+        .widgetList<Text>(
+          find.descendant(of: _pane, matching: find.byType(Text)),
+        )
+        .map((t) => t.data)
+        .toList();
 
     await setPaused(true);
     final before = texts();

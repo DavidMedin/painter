@@ -83,14 +83,14 @@ void main() {
     expect(persisted.single.mode, ThemeMode.light);
   });
 
-  testWidgets('Load stored workspaces switch updates and persists settings', (
-    tester,
-  ) async {
+  testWidgets('Load stored workspaces switch updates and persists settings, '
+      'logging the change (LOG-10)', (tester) async {
     final persisted = <PainterSettings>[];
     final controller = PainterSettingsController(
       persist: (settings) async => persisted.add(settings),
     );
-    await _pumpSettingsPane(tester, controller);
+    final logger = PainterLog.memory();
+    await _pumpSettingsPane(tester, controller, logger: logger);
     final toggle = find.byKey(const ValueKey('load-stored-workspaces'));
 
     expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
@@ -103,6 +103,14 @@ void main() {
     expect(controller.settings.loadStoredWorkspaces, isFalse);
     expect(persisted.single.loadStoredWorkspaces, isFalse);
     expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    // One info record naming only the setting that changed.
+    expect(logger.entries, hasLength(1));
+    expect(logger.entries.single.level, PainterLogLevel.info);
+    expect(logger.entries.single.messageId, 'settings.change.succeeded');
+    expect(logger.entries.single.arguments, {
+      'setting': 'loadStoredWorkspaces',
+      'value': 'false',
+    });
   });
 
   testWidgets('creates a selected custom palette with edited colors', (

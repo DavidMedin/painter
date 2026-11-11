@@ -12,9 +12,14 @@
 //   preserves the file's workspace section, and that only Flash writes one.
 //   docs/spec/undo-redo.md and docs/spec/keybinds.md (KEY-3) require Undo
 //   and Redo from buttons and Command+Z / Command+Shift+Z.
-// Covers: lib/main.dart (PainterApp file operations, Undo/Redo and Manual
-//   routing), lib/document/document_file_service.dart, lib/document/
-//   document_file_format.dart, lib/document/content_document.dart,
+//   docs/spec/logging.md requires a record of each Open, Save and Flash
+//   (LOG-10) or cancelled picker (LOG-12), a warning for an unusable stored
+//   workspace (LOG-13), one record per stroke without its points and none
+//   per pan (LOG-19, LOG-20, LOG-21), and a record of quitting (LOG-24);
+//   file failures are errors (LOG-11).
+// Covers: lib/main.dart (PainterApp file operations, Undo/Redo, Manual
+//   routing and its log records), lib/document/document_file_service.dart,
+//   lib/document/document_file_format.dart, lib/document/content_document.dart,
 //   lib/document/undo_history.dart, Workspace.applyJson/toJson through the
 //   app, CanvasView input, and ManualPane selection from the Details
 //   control.
@@ -42,7 +47,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' show Rect, Size;
+import 'dart:ui' show AppExitResponse, Rect, Size;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart'
@@ -449,14 +454,18 @@ void main() {
 
     expect(find.text('File operation failed'), findsOneWidget);
     expect(find.textContaining('Could not open the document'), findsOneWidget);
-    expect(logger.entries, hasLength(1));
-    expect(logger.entries.single.messageId, 'document.operation.failed');
-    expect(logger.entries.single.arguments['operation'], 'open');
-    expect(
-      logger.entries.single.arguments['error'],
-      contains('FormatException'),
-    );
-    expect(logger.entries.single.stackTrace, contains('_openDocument'));
+    // The stroke drawn above is a debug record (LOG-19); the failure is the
+    // only error (LOG-11).
+    List<PainterLogEntry> errors() => [
+      for (final entry in logger.entries)
+        if (entry.level == PainterLogLevel.error) entry,
+    ];
+    expect(errors(), hasLength(1));
+    expect(errors().single.messageId, 'document.operation.failed');
+    expect(errors().single.arguments['operation'], 'open');
+    expect(errors().single.arguments['path'], path);
+    expect(errors().single.arguments['error'], contains('FormatException'));
+    expect(errors().single.stackTrace, contains('_openDocument'));
     expect(controller.document.strokes, hasLength(1));
     expect(
       controller.document.strokes.single.points.map((point) => point.position),
@@ -495,10 +504,11 @@ void main() {
 
     expect(find.text('File operation failed'), findsOneWidget);
     expect(find.textContaining('Could not save the document'), findsOneWidget);
-    expect(logger.entries, hasLength(2));
-    expect(logger.entries.last.messageId, 'document.operation.failed');
-    expect(logger.entries.last.arguments['operation'], 'save');
-    expect(logger.entries.last.stackTrace, isNotEmpty);
+    expect(errors(), hasLength(2));
+    expect(errors().last.messageId, 'document.operation.failed');
+    expect(errors().last.arguments['operation'], 'save');
+    expect(errors().last.arguments['path'], fileService.savePath);
+    expect(errors().last.stackTrace, isNotEmpty);
     expect(controller.document.strokes, hasLength(1));
     await tester.tap(find.text('Details'));
     await tester.pumpAndSettle();
@@ -547,9 +557,7 @@ void main() {
 
   // DOCF-3, DOCF-4: an earlier-format file opens with its old grain, is saved
   // as format 2, and reopens with the same strokes.
-  testWidgets('Save writes an earlier-format file as format 2', (
-    tester,
-  ) async {
+  testWidgets('Save writes an earlier-format file as format 2', (tester) async {
     final path = '${temporaryDirectory.path}/old.paint';
     _writeFixture(path);
     await _pumpApp(
@@ -743,7 +751,118 @@ void main() {
     expect(_actionEnabled(tester, 'Undo'), isFalse);
     expect(_actionEnabled(tester, 'Redo'), isFalse);
   });
+
+  testWidgets('Open, Flash and Save log their file, and a cancelled picker '
+      'logs a debug record (LOG-10, LOG-12)', (tester) async {
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await _pumpApp(tester, _TestDocumentFileService(), logger: logger);
+    await _tapAction(tester, 'Open');
+    await _tapAction(tester, 'Save');
+    expect(_logged(logger, PainterLogLevel.debug), [
+      'document.open.cancelled',
+      'document.save.cancelled',
+    ]);
+    expect(_logged(logger, PainterLogLevel.info), isEmpty);
+
+    final path = '${temporaryDirectory.path}/logged.paint';
+    _writeFixture(path);
+    // A new PainterApp, not an update of the first one's State.
+    await tester.pumpWidget(const SizedBox());
+    await _pumpApp(
+      tester,
+      _TestDocumentFileService(openPath: path),
+      logger: logger,
+    );
+    await _tapAction(tester, 'Open');
+    await _tapAction(tester, 'Flash layout');
+    await _tapAction(tester, 'Save');
+
+    final infos = [
+      for (final entry in logger.entries)
+        if (entry.level == PainterLogLevel.info) entry,
+    ];
+    expect(
+      [for (final entry in infos) entry.messageId],
+      [
+        'document.open.succeeded',
+        'document.flash.succeeded',
+        'document.save.succeeded',
+      ],
+    );
+    expect(infos.map((entry) => entry.arguments['path']), everyElement(path));
+  });
+
+  testWidgets('an unusable stored workspace is logged as a warning naming '
+      'the file, and a file without one is not (LOG-13)', (tester) async {
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    final unusable = '${temporaryDirectory.path}/unusable.paint';
+    _writeFixture(unusable, workspace: _unusableSections['unknown mode']);
+    await _pumpApp(
+      tester,
+      _TestDocumentFileService(openPath: unusable),
+      logger: logger,
+    );
+    await _tapAction(tester, 'Open');
+    expect(_logged(logger, PainterLogLevel.warn), [
+      'workspace.stored.unusable',
+    ]);
+    expect(logger.entries.last.arguments, {'source': unusable});
+
+    final plain = '${temporaryDirectory.path}/plain.paint';
+    _writeFixture(plain);
+    await tester.pumpWidget(const SizedBox());
+    await _pumpApp(
+      tester,
+      _TestDocumentFileService(openPath: plain),
+      logger: logger,
+    );
+    await _tapAction(tester, 'Open');
+    expect(_logged(logger, PainterLogLevel.warn), hasLength(1));
+  });
+
+  testWidgets('a stroke makes one record without its points, and panning '
+      'makes none (LOG-19, LOG-20, LOG-21)', (tester) async {
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await _pumpApp(tester, _TestDocumentFileService(), logger: logger);
+    final canvasFinder = find.byType(CanvasView);
+    await _drawStroke(tester, canvasFinder, 1, Offset.zero);
+    expect(_logged(logger, PainterLogLevel.debug), [
+      'document.stroke.finished',
+    ]);
+    expect(logger.entries.single.arguments, {'chunks': 1});
+
+    final view = tester.widget<CanvasView>(canvasFinder).viewport;
+    for (var step = 0; step < 10; step++) {
+      view.panBy(const Offset(5, 0), const Size(1024, 1024));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(logger.entries, hasLength(1));
+  });
+
+  testWidgets('quitting records it and then lets Painter exit (LOG-24)', (
+    tester,
+  ) async {
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await _pumpApp(tester, _TestDocumentFileService(), logger: logger);
+
+    final response = await tester.binding.handleRequestAppExit();
+
+    expect(response, AppExitResponse.exit);
+    expect(logger.entries.last.messageId, 'app.quit');
+    expect(logger.entries.last.level, PainterLogLevel.info);
+  });
 }
+
+/// The message ids [logger] holds at [level], oldest first.
+List<String> _logged(PainterLog logger, PainterLogLevel level) => [
+  for (final entry in logger.entries)
+    if (entry.level == level) entry.messageId,
+];
 
 /// Draws one short mouse stroke (14 x 8 units) starting at [offset] from the
 /// canvas center. Callers pass a distinct [pointerId] per stroke so each one
@@ -836,12 +955,14 @@ Future<void> _pumpApp(
   WidgetTester tester,
   DocumentFileService fileService, {
   bool loadStoredWorkspaces = true,
+  PainterLog? logger,
 }) => tester.pumpWidget(
   PainterApp(
     fileService: fileService,
     initialSettings: PainterSettings.defaults.copyWith(
       loadStoredWorkspaces: loadStoredWorkspaces,
     ),
+    logger: logger,
   ),
 );
 
@@ -881,10 +1002,7 @@ void _expectLayoutUntouched(WidgetTester tester, _Arrangement layout) {
   expect(find.byType(CanvasView), findsNWidgets(2));
   expect(_canvasRects(tester), layout.rects);
   expect(
-    tester
-        .widget<CanvasView>(find.byType(CanvasView).at(0))
-        .viewport
-        .extent,
+    tester.widget<CanvasView>(find.byType(CanvasView).at(0)).viewport.extent,
     layout.extent,
   );
 }
@@ -946,9 +1064,7 @@ final Map<String, Object?> _unusableSections = {
       },
     ],
   },
-  'zero share': _rowSection([
-    (0.0, _paneNode('canvas', _canvasState(512))),
-  ]),
+  'zero share': _rowSection([(0.0, _paneNode('canvas', _canvasState(512)))]),
   'unknown mode': _rowSection([
     (1.0, _paneNode('hologram', _canvasState(512))),
   ]),
@@ -996,8 +1112,7 @@ class _SavedFile {
   bool get format2 => DocumentContainer.hasMagic(bytes);
 
   /// The file's sections, content included, in file order.
-  List<DocumentSection> get sections =>
-      DocumentContainer.parse(bytes).sections;
+  List<DocumentSection> get sections => DocumentContainer.parse(bytes).sections;
 }
 
 _SavedFile _readFile(String path) {

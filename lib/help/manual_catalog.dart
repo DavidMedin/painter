@@ -24,6 +24,7 @@ enum HelpId {
   themeColor,
   paneBoundary,
   logEntryDetails,
+  logSeverity,
   loadStoredWorkspaces,
   flashWorkspace,
   pickerUp,
@@ -91,6 +92,7 @@ abstract final class HelpIds {
   static const rebuildTiles = HelpId.rebuildTiles;
   static const copyReport = HelpId.copyReport;
   static const logEntryDetails = HelpId.logEntryDetails;
+  static const logSeverity = HelpId.logSeverity;
   static const openSession = HelpId.openSession;
   static const startSession = HelpId.startSession;
   static const joinSession = HelpId.joinSession;
@@ -314,6 +316,17 @@ class ManualCatalog {
       content:
           'Expand a log record to inspect its structured arguments and stack '
           'trace when they are available.',
+    ),
+    HelpId.logSeverity: ManualArticle(
+      id: HelpId.logSeverity,
+      title: 'Lowest severity',
+      tooltip: 'Choose the least severe records this Log pane lists',
+      section: 'Logging',
+      content:
+          'Each Log pane lists only records at or above the severity chosen '
+          'here, from TRACE (every record) through DEBUG, INFO and WARN to '
+          'ERROR. The choice hides rows in this pane only: other Log panes, '
+          'the status bar and the log file keep every record.',
     ),
     HelpId.themeMode: ManualArticle(
       id: HelpId.themeMode,
@@ -634,7 +647,10 @@ class ManualCatalog {
         HelpId.copyReport,
       ],
     ),
-    ManualSection(title: 'Logging', articles: [HelpId.logEntryDetails]),
+    ManualSection(
+      title: 'Logging',
+      articles: [HelpId.logEntryDetails, HelpId.logSeverity],
+    ),
     ManualSection(
       title: 'Dialogs',
       articles: [HelpId.dialogClose, HelpId.dialogCancel, HelpId.dialogDetails],

@@ -4,7 +4,7 @@ This document describes what about the current state of the project is not in co
 This document is not append-only, and should always be reevaluated by the human after changes have been made.
 Each non-compliance item shall be given a unique id, like NON-000, that may be referenced in plan.md
 This section of the document must not change. Everything after here may.
-Next id: NON-013
+Next id: NON-014
 ## Code
 
 ### NON-002: Tabs not implemented
@@ -34,10 +34,10 @@ details: the current toolbar implementation is using an old spec that is not pre
 **Status**: Not implemented
 **Details**: Undo history (docs/decisions/012-undo-per-participant.md) holds stroke ids and removed stroke data in memory; nothing detects memory pressure or warns that an edit cannot be undone.
 
-### NON-012: Logging covers only start and some failures
-**Spec**: docs/spec/logging.md (LOG-8, LOG-10, LOG-12, LOG-13, LOG-15, LOG-16, LOG-17, LOG-18, LOG-19, LOG-22, LOG-23, LOG-24); docs/decisions/014-logging.md
-**Status**: Partial
-**Details**: The app logs its start, unhandled errors, and failures of Open, Save, Flash, Session commands, settings, and splat generation. Nothing is logged when an Operation succeeds or is cancelled, when a Participant joins, leaves, or times out, when a join is refused, when the Host changes, when the user edits, or when the user quits. The Log pane lists every record and has no lowest-Severity control. These catches fall back without a Log record (PNT-A0020-05): `lib/settings/settings_store.dart` (unreadable settings), `lib/settings/painter_settings.dart` (invalid custom theme), `lib/document/document_file_format.dart` and `lib/main.dart` (unreadable workspace section), `lib/session/session_network.dart` (malformed peer message), `lib/document/file_picker_dialog.dart` (unlistable directory). No test cites a LOG ID.
+### NON-013: The Log file is inside the app sandbox, not at ~/Library/Logs/Painter/painter.log
+**Spec**: docs/spec/logging.md (Log file, LOG-1)
+**Status**: Non-compliant
+**Details**: The macOS app is sandboxed, so the `HOME` that `PainterLog` builds the path from is the container's. A run of the debug build wrote `~/Library/Containers/com.example.painter/Data/Library/Logs/Painter/painter.log`, and nothing at `~/Library/Logs/Painter/painter.log`. Either the spec names the container path or the app needs another way to reach the user's log directory.
 
 ## Tests
 

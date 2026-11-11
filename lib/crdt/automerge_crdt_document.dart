@@ -201,6 +201,8 @@ final class AutomergeCrdtDocument implements CrdtDocument {
     try {
       return _doc.get(map, key);
     } on AutomergeException {
+      // Normal flow (docs/decisions/014-logging.md PNT-A0020-05): a kind
+      // the port does not model reads as absent, as documented above.
       return null;
     }
   }

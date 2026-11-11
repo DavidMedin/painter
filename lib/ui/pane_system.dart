@@ -220,7 +220,13 @@ class _PaneSystemState extends State<PaneSystem> {
                         Expanded(
                           child: Column(
                             children: [
-                              _buildToolbar(context, workspace, id, index, kind),
+                              _buildToolbar(
+                                context,
+                                workspace,
+                                id,
+                                index,
+                                kind,
+                              ),
                               Expanded(
                                 child: Material(
                                   color: scheme.surface,
@@ -448,7 +454,8 @@ class _PaneSystemState extends State<PaneSystem> {
   /// Builds a splitter: a gap-colored bar with a handle at its center that
   /// resizes the two parts it separates when dragged (PANE-3). A drag of d
   /// pixels moves it by d over the workspace extent across it, so the
-  /// Workspace can clamp in fractions (PANE-26).
+  /// Workspace can clamp in fractions (PANE-26). The drag's end is reported
+  /// once, so the whole drag makes one log record (LOG-19).
   Widget _buildSplitter(
     BuildContext context,
     LayoutSplitter splitter,
@@ -471,9 +478,15 @@ class _PaneSystemState extends State<PaneSystem> {
           onHorizontalDragUpdate: vertical
               ? (details) => drag(details.delta.dx, area.width)
               : null,
+          onHorizontalDragEnd: vertical
+              ? (_) => widget.workspace.finishSplitterDrag()
+              : null,
           onVerticalDragUpdate: vertical
               ? null
               : (details) => drag(details.delta.dy, area.height),
+          onVerticalDragEnd: vertical
+              ? null
+              : (_) => widget.workspace.finishSplitterDrag(),
           child: Semantics(
             label: 'Resize pane boundary',
             child: ColoredBox(

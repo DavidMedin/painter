@@ -388,14 +388,28 @@ class PainterSettings {
     'loadStoredWorkspaces': loadStoredWorkspaces,
   };
 
-  /// Restores preferences and custom themes, defaulting malformed records.
-  factory PainterSettings.fromJson(Object? value) {
-    if (value is! Map<String, dynamic>) return defaults;
-    final mode = switch (value['mode']) {
+  /// Restores preferences and custom themes, using a default for each
+  /// malformed part. [onInvalid] is told about each part replaced, so the
+  /// caller can record it (docs/spec/logging.md LOG-13).
+  factory PainterSettings.fromJson(
+    Object? value, {
+    void Function(String problem)? onInvalid,
+  }) {
+    if (value is! Map<String, dynamic>) {
+      onInvalid?.call('the settings record is not a JSON object');
+      return defaults;
+    }
+    final storedMode = value['mode'];
+    final mode = switch (storedMode) {
       'light' => ThemeMode.light,
       'dark' => ThemeMode.dark,
       _ => ThemeMode.system,
     };
+    if (storedMode != null &&
+        storedMode != 'system' &&
+        mode == ThemeMode.system) {
+      onInvalid?.call('theme mode "$storedMode" is unknown');
+    }
     final customThemes = <PainterTheme>[];
     final storedThemes = value['customThemes'];
     if (storedThemes is List) {
@@ -405,29 +419,52 @@ class PainterSettings {
           if (!builtInThemes.any((builtIn) => builtIn.id == theme.id) &&
               !customThemes.any((existing) => existing.id == theme.id)) {
             customThemes.add(theme);
+          } else {
+            onInvalid?.call(
+              'skipped custom theme "${theme.id}": its id is already taken',
+            );
           }
-        } on FormatException {
+        } on FormatException catch (error) {
           // Skip an invalid custom theme without discarding other settings.
+          onInvalid?.call('skipped a custom theme: ${error.message}');
         }
       }
+    } else if (storedThemes != null) {
+      onInvalid?.call('custom themes are not a list');
+    }
+    String themeId(String key, String fallback) {
+      final stored = value[key];
+      if (stored is String) return stored;
+      if (stored != null) onInvalid?.call('$key is not a string');
+      return fallback;
+    }
+
+    final storedLoad = value['loadStoredWorkspaces'];
+    if (storedLoad != null && storedLoad is! bool) {
+      onInvalid?.call('loadStoredWorkspaces is not true or false');
     }
     final settings = PainterSettings(
       mode: mode,
-      lightThemeId: value['lightThemeId'] is String
-          ? value['lightThemeId'] as String
-          : defaults.lightThemeId,
-      darkThemeId: value['darkThemeId'] is String
-          ? value['darkThemeId'] as String
-          : defaults.darkThemeId,
+      lightThemeId: themeId('lightThemeId', defaults.lightThemeId),
+      darkThemeId: themeId('darkThemeId', defaults.darkThemeId),
       customThemes: List.unmodifiable(customThemes),
-      loadStoredWorkspaces: value['loadStoredWorkspaces'] is bool
-          ? value['loadStoredWorkspaces'] as bool
+      loadStoredWorkspaces: storedLoad is bool
+          ? storedLoad
           : defaults.loadStoredWorkspaces,
     );
-    return settings.copyWith(
-      lightThemeId: settings.themeFor(Brightness.light).id,
-      darkThemeId: settings.themeFor(Brightness.dark).id,
-    );
+    final light = settings.themeFor(Brightness.light).id;
+    final dark = settings.themeFor(Brightness.dark).id;
+    if (light != settings.lightThemeId) {
+      onInvalid?.call(
+        '"${settings.lightThemeId}" is not an available light theme',
+      );
+    }
+    if (dark != settings.darkThemeId) {
+      onInvalid?.call(
+        '"${settings.darkThemeId}" is not an available dark theme',
+      );
+    }
+    return settings.copyWith(lightThemeId: light, darkThemeId: dark);
   }
 }
 

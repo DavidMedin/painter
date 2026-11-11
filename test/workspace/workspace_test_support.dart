@@ -15,6 +15,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/crdt/automerge_crdt_document.dart';
 import 'package:painter/crdt/crdt_document.dart';
+import 'package:painter/logging/painter_log.dart';
 import 'package:painter/session/session_document.dart';
 import 'package:painter/workspace/layout_tree.dart';
 import 'package:painter/workspace/workspace.dart';
@@ -30,10 +31,7 @@ SessionDocument sessionWithDefaultWorkspace() {
     document,
     name: 'A',
     engine: 1,
-    nodes: createDefaultLayout(
-      newId: document.newId,
-      actor: document.actorId,
-    ),
+    nodes: createDefaultLayout(newId: document.newId, actor: document.actorId),
   );
 }
 
@@ -51,14 +49,19 @@ String testWorkspaceOf(SessionDocument session) =>
     session.participants.singleWhere((entry) => entry.joined == 0).workspace;
 
 /// A Workspace over the test workspace of [session] (a new session when
-/// null) that adds removed pane ids to [removed]; disposed at the end of the
-/// test.
-Workspace openWorkspace({SessionDocument? session, List<String>? removed}) {
+/// null) that adds removed pane ids to [removed] and logs edits to [log];
+/// disposed at the end of the test.
+Workspace openWorkspace({
+  SessionDocument? session,
+  List<String>? removed,
+  PainterLog? log,
+}) {
   final shown = session ?? sessionWithDefaultWorkspace();
   final workspace = Workspace(
     session: shown,
     workspaceId: testWorkspaceOf(shown),
     onPaneRemoved: removed?.add,
+    log: log,
   );
   addTearDown(workspace.dispose);
   return workspace;

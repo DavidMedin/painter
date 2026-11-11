@@ -6,13 +6,15 @@
 //   the only way to exercise the 10 s rule (MPLY-17) rather than a close.
 // Coupled to: lib/session/session_document.dart,
 //   lib/session/session_network.dart, lib/crdt/automerge_crdt_document.dart,
-//   and the tests in this folder that import it.
+//   lib/logging/painter_log.dart (each Participant's network logs to its own
+//   memory log), and the tests in this folder that import it.
 
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/crdt/automerge_crdt_document.dart';
 import 'package:painter/crdt/crdt_document.dart';
+import 'package:painter/logging/painter_log.dart';
 import 'package:painter/session/session_document.dart';
 import 'package:painter/session/session_network.dart';
 import 'package:painter/workspace/layout_tree.dart' show LayoutNodes;
@@ -73,10 +75,10 @@ Future<void> eventually(
   }
 }
 
-/// A Participant with its own documents and network on 127.0.0.1, disposed
-/// at the end of the test.
+/// A Participant with its own documents, network and memory log on
+/// 127.0.0.1, disposed at the end of the test.
 final class TestParticipant {
-  TestParticipant._(this.content, this.session, this.network);
+  TestParticipant._(this.content, this.session, this.network, this.log);
 
   /// Creates the Session's documents, as its creator, and listens.
   static Future<TestParticipant> host(
@@ -130,6 +132,7 @@ final class TestParticipant {
     Duration pingInterval,
     Duration peerTimeout,
   ) {
+    final log = PainterLog.memory();
     final participant = TestParticipant._(
       content,
       session,
@@ -140,7 +143,9 @@ final class TestParticipant {
         engine: engine,
         pingInterval: pingInterval,
         peerTimeout: peerTimeout,
+        log: log,
       ),
+      log,
     );
     addTearDown(participant._dispose);
     return participant;
@@ -149,6 +154,21 @@ final class TestParticipant {
   final CrdtDocument content;
   final SessionDocument session;
   final SessionNetwork network;
+
+  /// What [network] logged (docs/spec/logging.md LOG-15 to LOG-18).
+  final PainterLog log;
+
+  /// The message ids [log] holds at [level], oldest first.
+  List<String> logged(PainterLogLevel level) => [
+    for (final entry in log.entries)
+      if (entry.level == level) entry.messageId,
+  ];
+
+  /// The `participant` argument of each record of [messageId] in [log].
+  List<Object?> loggedParticipants(String messageId) => [
+    for (final entry in log.entries)
+      if (entry.messageId == messageId) entry.arguments['participant'],
+  ];
 
   String get id => session.localId;
 
@@ -177,6 +197,7 @@ final class TestParticipant {
     await network.leave();
     content.dispose();
     session.document.dispose();
+    log.dispose();
   }
 }
 

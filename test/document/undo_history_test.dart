@@ -1,7 +1,8 @@
 // What: Unit tests of EditHistory: the acceptance examples of
 //   docs/spec/undo-redo.md (including the two-Participant one), identical
-//   redo, one commit per undo and redo, the 256-edit cap, and redo of a
-//   stroke a peer removed.
+//   redo, one commit per undo and redo, the 256-edit cap, redo of a
+//   stroke a peer removed, and one debug log record per finished gesture,
+//   undo and redo (docs/spec/logging.md LOG-19, LOG-20).
 // Why: docs/decisions/012-undo-per-participant.md makes undo an inverse
 //   change on the shared content document that reverts only the local
 //   Participant's gestures (UNDO-1..5, UNDO-7..9); these tests pin that
@@ -15,6 +16,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/crdt/crdt_document.dart';
 import 'package:painter/document/undo_history.dart';
+import 'package:painter/logging/painter_log.dart';
 
 import 'content_test_support.dart';
 
@@ -43,6 +45,43 @@ void main() {
     expect(history.redo(), isTrue);
     expect(p.ids, [a, b]);
     expect(p.content.crdt.keys(['strokes']).toSet(), {a, b});
+  });
+
+  test('a finished gesture, an undo and a redo each make one debug record; '
+      'pointer moves and refused undos make none (LOG-19, LOG-20)', () {
+    final p = Replica.create();
+    final log = PainterLog.memory();
+    addTearDown(log.dispose);
+    final history = EditHistory(
+      controller: p.controller,
+      content: p.content,
+      log: log,
+    );
+    addTearDown(history.dispose);
+
+    p.controller.beginStroke(Offset.zero, 1);
+    for (var x = 1; x <= 20; x++) {
+      p.controller.extendStroke(Offset(x.toDouble(), 0), 1);
+    }
+    expect(log.entries, isEmpty, reason: 'nothing per pointer event');
+    p.controller.endStroke();
+    history.undo();
+    history.undo();
+    history.redo();
+    history.redo();
+
+    expect(
+      [for (final entry in log.entries) entry.messageId],
+      [
+        'document.stroke.finished',
+        'document.undo.succeeded',
+        'document.redo.succeeded',
+      ],
+    );
+    expect(
+      log.entries.every((entry) => entry.level == PainterLogLevel.debug),
+      isTrue,
+    );
   });
 
   test('draw A, undo, draw C, redo has no effect (UNDO-3)', () {

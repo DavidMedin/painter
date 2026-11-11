@@ -15,7 +15,10 @@
 //   WKSP-36, WKSP-37), a local workspace a peer deletes is recreated from
 //   the layout last shown (docs/decisions/009-shared-workspaces.md
 //   PNT-A0015-04), and Leave session
-//   keeps the strokes and allows a new Start (MPLY-15, MPLY-16).
+//   keeps the strokes and allows a new Start (MPLY-15, MPLY-16). The app's
+//   log records each Session Operation it completes (docs/spec/logging.md
+//   LOG-10) or the user cancels (LOG-12), and the Session's changes
+//   (LOG-15, LOG-18).
 // Covers: lib/main.dart (Session flows, membership following),
 //   lib/session/session_pane.dart (pane and dialogs),
 //   lib/workspace/workspace.dart (openPane, nodesFromJson), with
@@ -31,6 +34,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_view.dart';
 import 'package:painter/canvas/pencil_splats.dart' show strokeEngineVersion;
 import 'package:painter/logging/log_widgets.dart';
+import 'package:painter/logging/painter_log.dart';
 import 'package:painter/main.dart';
 import 'package:painter/session/session_pane.dart';
 import 'package:painter/settings/painter_settings.dart';
@@ -42,13 +46,20 @@ import 'package:painter/workspace/workspace.dart';
 
 import 'app_session_support.dart';
 
-/// The app under test: listens on loopback with an OS-chosen port and
-/// offers 'Ann' as the account name.
-PainterApp _app() => PainterApp(
+/// The app under test: listens on loopback with an OS-chosen port, offers
+/// 'Ann' as the account name, and logs to [logger] when given.
+PainterApp _app({PainterLog? logger}) => PainterApp(
   sessionBindAddress: InternetAddress.loopbackIPv4,
   sessionPort: 0,
   accountName: 'Ann',
+  logger: logger,
 );
+
+/// The message ids [logger] holds at [level], oldest first.
+List<String> _logged(PainterLog logger, PainterLogLevel level) => [
+  for (final entry in logger.entries)
+    if (entry.level == level) entry.messageId,
+];
 
 /// Unmounts the app (which leaves its Session) and lets the sockets close.
 Future<void> _closeApp(WidgetTester tester) async {
@@ -99,7 +110,9 @@ void main() {
   testWidgets('the app hosts: a peer joins, strokes cross both ways, the peer '
       'splits the shared workspace, Make host moves the Host, and Leave '
       'session keeps the strokes', (tester) async {
-    await tester.pumpWidget(_app());
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await tester.pumpWidget(_app(logger: logger));
     await drawInApp(tester);
     expect(appStrokes(tester), hasLength(1));
 
@@ -219,7 +232,49 @@ void main() {
     );
     expect(appStrokes(tester), hasLength(3));
 
+    // LOG-10, LOG-15 and LOG-18: each step above is in the app's log.
+    expect(
+      _logged(logger, PainterLogLevel.info),
+      containsAllInOrder([
+        'session.start.succeeded',
+        'session.participant.joined',
+        'session.promote.succeeded',
+        'session.leave.succeeded',
+        'session.start.succeeded',
+      ]),
+    );
+    expect(
+      _logged(logger, PainterLogLevel.info),
+      contains('session.host.changed'),
+    );
+    final joined = logger.entries.firstWhere(
+      (entry) => entry.messageId == 'session.participant.joined',
+    );
+    expect(joined.arguments['participant'], 'Bo');
+
     await settle(tester, peer.dispose, reason: 'the peer leaving');
+    await _closeApp(tester);
+  });
+
+  testWidgets('cancelling the Start and Join dialogs logs a debug record '
+      '(LOG-12)', (tester) async {
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await tester.pumpWidget(_app(logger: logger));
+    await tapAction(tester, 'Session');
+    await tester.pumpAndSettle();
+    for (final key in ['session-start', 'session-join']) {
+      await tapKey(tester, key);
+      await tester.pumpAndSettle();
+      await tapKey(tester, 'session-dialog-cancel');
+      await tester.pumpAndSettle();
+    }
+
+    expect(
+      _logged(logger, PainterLogLevel.debug),
+      containsAllInOrder(['session.start.cancelled', 'session.join.cancelled']),
+    );
+    expect(_logged(logger, PainterLogLevel.info), isEmpty);
     await _closeApp(tester);
   });
 
@@ -327,7 +382,9 @@ void main() {
     ))!;
     await tester.runAsync(() async => host.drawStroke());
 
-    await tester.pumpWidget(_app());
+    final logger = PainterLog.memory();
+    addTearDown(logger.dispose);
+    await tester.pumpWidget(_app(logger: logger));
     await drawInApp(tester);
     await tapAction(tester, 'Session');
     await tester.pumpAndSettle();
@@ -370,6 +427,15 @@ void main() {
       () => host.strokes.length == 2,
       reason: "the app's stroke at the host",
     );
+
+    // LOG-10: the join is logged with its address; the stored workspace
+    // was usable, so nothing was a warning.
+    final join = logger.entries.singleWhere(
+      (entry) => entry.messageId == 'session.join.succeeded',
+    );
+    expect(join.level, PainterLogLevel.info);
+    expect(join.arguments['address'], host.address);
+    expect(_logged(logger, PainterLogLevel.warn), isEmpty);
 
     await settle(tester, host.dispose, reason: 'the host leaving');
     await _closeApp(tester);

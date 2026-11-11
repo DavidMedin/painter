@@ -63,6 +63,14 @@
 // asynchronous errors to that same file-backed history. No fatal-error
 // classification is recorded, so the handlers do not invent one.
 //
+// Logging (docs/spec/logging.md, docs/decisions/014-logging.md): every
+// Operation this State runs records its success (info), cancellation
+// (debug) or failure (error); fallbacks such as an unusable stored
+// workspace or deleted unreadable strokes are warnings. Edits are recorded
+// by the models that make them (EditHistory, Workspace), and Session
+// membership by SessionNetwork, each given [_logger]. Quitting records an
+// info record and waits for it to reach the file ([_onExitRequested]).
+//
 // Pane system and workspace (docs/spec/panes.md, docs/spec/workspace.md):
 // PainterApp creates the session document (session/session_document.dart,
 // docs/decisions/009-shared-workspaces.md) with the local Participant as the
@@ -112,6 +120,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -148,15 +157,12 @@ import 'workspace/workspace.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  final logger = await PainterLog.open(
-    pipeToStdout: args.contains('--log-to-stdout'),
-  );
-  installFlutterLogHandlers(logger);
-  await logger.info('app.started');
+  final logger = await startLogging(args);
   final store = SharedPreferencesPainterSettingsStore();
+  final invalidSettings = <String>[];
   PainterSettings settings;
   try {
-    settings = await store.load();
+    settings = await store.load(onInvalid: invalidSettings.add);
   } catch (error, stackTrace) {
     await logger.warn(
       'settings.load.failed',
@@ -165,6 +171,9 @@ Future<void> main(List<String> args) async {
     );
     settings = PainterSettings.defaults;
   }
+  for (final problem in invalidSettings) {
+    await logger.warn('settings.load.invalid', arguments: {'problem': problem});
+  }
   runApp(
     PainterApp(
       initialSettings: settings,
@@ -172,6 +181,23 @@ Future<void> main(List<String> args) async {
       logger: logger,
     ),
   );
+}
+
+/// Opens the file-backed log in [directory] (the user's log directory by
+/// default), mirroring it to stdout when [args] hold `--log-to-stdout`
+/// (LOG-6), routes uncaught errors to it (LOG-14), and records the start
+/// (LOG-9). Runs before anything else can fail.
+Future<PainterLog> startLogging(
+  List<String> args, {
+  Directory? directory,
+}) async {
+  final logger = await PainterLog.open(
+    directory: directory,
+    pipeToStdout: args.contains('--log-to-stdout'),
+  );
+  installFlutterLogHandlers(logger);
+  await logger.info('app.started');
+  return logger;
 }
 
 /// The root widget of the Painter app.
@@ -214,7 +240,8 @@ class _PainterAppState extends State<PainterApp> {
   late final bool _ownsLogger;
   final CanvasController _controller = CanvasController();
   late final DocumentFileService _fileService =
-      widget.fileService ?? InAppDocumentFileService();
+      widget.fileService ??
+      InAppDocumentFileService(onListError: _onPickerListError);
   late final PainterSettingsController _settings;
   String? _documentPath;
 
@@ -261,6 +288,9 @@ class _PainterAppState extends State<PainterApp> {
   /// Whether [_followMembership] is already scheduled.
   bool _membershipCheckDue = false;
 
+  /// Records Painter quitting before it exits (LOG-24).
+  late final AppLifecycleListener _lifecycle;
+
   /// A new session document created by this app as the only Participant,
   /// named [name], in a workspace holding [nodes], or the Layout tree's
   /// default table when null (the Default workspace).
@@ -292,9 +322,25 @@ class _PainterAppState extends State<PainterApp> {
       initial: widget.initialSettings,
       persist: widget.persistSettings,
     );
+    _lifecycle = AppLifecycleListener(onExitRequested: _onExitRequested);
     _attachContent(ContentDocument.create(_backend));
     _attachSession(_createSession());
   }
+
+  /// Records that Painter is quitting and lets it exit once the record is in
+  /// the log file (LOG-24).
+  Future<AppExitResponse> _onExitRequested() async {
+    await _logger.info('app.quit');
+    return AppExitResponse.exit;
+  }
+
+  /// Records a directory the file picker could not list (LOG-13).
+  void _onPickerListError(String path, Object error) => unawaited(
+    _logger.warn(
+      'document.picker.list_failed',
+      arguments: {'path': path, 'error': error.toString()},
+    ),
+  );
 
   /// Makes [session] the session document and shows the local
   /// Participant's workspace. [_replaceSession] frees the previous pair.
@@ -309,6 +355,7 @@ class _PainterAppState extends State<PainterApp> {
     workspaceId: workspaceId,
     onPaneRemoved: _onPaneRemoved,
     afterDetach: _afterDetach,
+    log: _logger,
   );
 
   /// Runs [dispose] after the next frame, when the widgets of panes a
@@ -387,11 +434,26 @@ class _PainterAppState extends State<PainterApp> {
   }
 
   /// Makes [content] the drawn document with a new, empty undo history
-  /// (PNT-A0018-05). [_replaceContent] frees the previous pair first.
+  /// (PNT-A0018-05). [_replaceContent] frees the previous pair first. Content
+  /// that peers make unusable, and unreadable strokes they send, are logged
+  /// whichever way the document was made (LOG-13).
   void _attachContent(ContentDocument content) {
     content.attach(_controller);
+    content.onRejected = (error) => unawaited(
+      _logSessionError('follow the session content', error, StackTrace.current),
+    );
+    content.onUnreadable = (count) => unawaited(
+      _logger.warn(
+        'document.strokes.unreadable',
+        arguments: {'count': count, 'source': 'the session'},
+      ),
+    );
     _content = content;
-    _history = EditHistory(controller: _controller, content: content);
+    _history = EditHistory(
+      controller: _controller,
+      content: content,
+      log: _logger,
+    );
     _undoState = Listenable.merge([_controller, _history]);
   }
 
@@ -458,7 +520,11 @@ class _PainterAppState extends State<PainterApp> {
         onHelpIdSelected: (helpId) =>
             _workspace.setManualHelpId(pane.id, helpId),
       ),
-      PaneKind.log => LogPane(log: _logger),
+      PaneKind.log => LogPane(
+        log: _logger,
+        lowest: _workspace.logLowest(pane.id),
+        onLowestChanged: (level) => _workspace.setLogLowest(pane.id, level),
+      ),
       PaneKind.session => SessionPane(
         network: _network,
         busy: _sessionOperationInProgress,
@@ -469,16 +535,21 @@ class _PainterAppState extends State<PainterApp> {
           context,
           'join the workspace',
           () => _session.joinWorkspace(participantId),
+          succeeded: 'workspace.join.succeeded',
+          arguments: {'participant': _participantName(participantId)},
         ),
         onLeaveWorkspace: () => _sessionAction(
           context,
           'leave the workspace',
           _session.leaveJoinedWorkspace,
+          succeeded: 'workspace.leave.succeeded',
         ),
         onPromote: (participantId) => _sessionAction(
           context,
           'make the participant host',
           () => _network?.promote(participantId),
+          succeeded: 'session.promote.succeeded',
+          arguments: {'participant': _participantName(participantId)},
         ),
       ),
     };
@@ -521,13 +592,18 @@ class _PainterAppState extends State<PainterApp> {
       context,
       initialName: _accountName,
     );
-    if (name == null || !mounted || _sessionOperationInProgress) return;
+    if (name == null) {
+      unawaited(_logger.debug('session.start.cancelled'));
+      return;
+    }
+    if (!mounted || _sessionOperationInProgress) return;
     setState(() => _sessionOperationInProgress = true);
     final network = SessionNetwork(
       content: _content.crdt,
       session: _session,
       name: name,
       engine: strokeEngineVersion,
+      log: _logger,
     );
     try {
       _session.setLocalName(name);
@@ -539,6 +615,12 @@ class _PainterAppState extends State<PainterApp> {
       );
       if (mounted) {
         _network = network;
+        unawaited(
+          _logger.info(
+            'session.start.succeeded',
+            arguments: {'addresses': network.addresses.join(', ')},
+          ),
+        );
       } else {
         await network.leave();
       }
@@ -564,7 +646,11 @@ class _PainterAppState extends State<PainterApp> {
       context,
       initialName: _accountName,
     );
-    if (request == null || !mounted || _sessionOperationInProgress) return;
+    if (request == null) {
+      unawaited(_logger.debug('session.join.cancelled'));
+      return;
+    }
+    if (!mounted || _sessionOperationInProgress) return;
     setState(() => _sessionOperationInProgress = true);
     final contentCrdt = _backend.create();
     final session = SessionDocument(_backend.create());
@@ -573,10 +659,12 @@ class _PainterAppState extends State<PainterApp> {
       session: session,
       name: request.name,
       engine: strokeEngineVersion,
+      log: _logger,
     );
     // WKSP-11's "workspace that was active when it was opened".
     final loadStored = _settings.settings.loadStoredWorkspaces;
     final active = _workspace.toJson();
+    var storedUnusable = false;
     ContentDocument? content;
     try {
       await network.join(
@@ -585,6 +673,7 @@ class _PainterAppState extends State<PainterApp> {
           session,
           loadStored: loadStored,
           active: active,
+          onUnusable: () => storedUnusable = true,
         ),
         bindAddress: widget.sessionBindAddress,
         port: widget.sessionPort,
@@ -611,26 +700,51 @@ class _PainterAppState extends State<PainterApp> {
       }
       return;
     }
-    content.onRejected = (error) => unawaited(
-      _logSessionError('follow the session content', error, StackTrace.current),
-    );
     _replaceContent(content);
     _documentPath = null;
     _preservedSections = const [];
     _network = network;
     _sessionOperationInProgress = false;
     _replaceSession(session);
+    unawaited(
+      _logger.info(
+        'session.join.succeeded',
+        arguments: {'address': request.address},
+      ),
+    );
+    if (storedUnusable) {
+      unawaited(
+        _logger.warn(
+          'workspace.stored.unusable',
+          arguments: {'source': 'the session'},
+        ),
+      );
+    }
+    if (content.unreadableOnAdopt > 0) {
+      unawaited(
+        _logger.warn(
+          'document.strokes.unreadable',
+          arguments: {
+            'count': content.unreadableOnAdopt,
+            'source': 'the session',
+          },
+        ),
+      );
+    }
   }
 
   /// The joiner's first node table, built after the first sync with ids of
   /// [session]'s document: the Session's `storedWorkspace` when [loadStored]
   /// and it is usable (WKSP-9), else a copy of [active], the workspace
   /// section of the workspace shown before joining, else the Default
-  /// workspace (WKSP-10, WKSP-11).
+  /// workspace (WKSP-10, WKSP-11). [onUnusable] is called when a
+  /// `storedWorkspace` was considered but is Unusable, so it can be logged
+  /// (LOG-13).
   static LayoutNodes _joinedWorkspaceNodes(
     SessionDocument session, {
     required bool loadStored,
     required Object? active,
+    required void Function() onUnusable,
   }) {
     final document = session.document;
     final stored = loadStored ? session.storedWorkspace : null;
@@ -639,10 +753,12 @@ class _PainterAppState extends State<PainterApp> {
       try {
         json = jsonDecode(stored);
       } on FormatException {
+        // Undecodable is Unusable; reported through onUnusable below.
         json = null;
       }
       final nodes = Workspace.nodesFromJson(json, document);
       if (nodes != null) return nodes;
+      onUnusable();
     }
     return Workspace.nodesFromJson(active, document) ??
         createDefaultLayout(newId: document.newId, actor: document.actorId);
@@ -672,21 +788,33 @@ class _PainterAppState extends State<PainterApp> {
         nodes: _session.workspaceNodes(_workspace.workspaceId),
       ),
     );
-    if (failure != null && context.mounted) {
+    if (failure == null) {
+      unawaited(_logger.info('session.leave.succeeded'));
+    } else if (context.mounted) {
       await showSessionErrorDialog(context, 'leave the session', failure);
     }
   }
 
+  /// The shown name of Participant [participantId], or its id.
+  String _participantName(String participantId) {
+    final name = _session.participant(participantId)?.name;
+    return name == null || name.isEmpty ? participantId : name;
+  }
+
   /// Runs a Session pane action that writes the session document or
-  /// promotes; a failure (for example joining a workspace that was just
-  /// discarded) is logged and shown.
+  /// promotes, recording [succeeded] with [arguments] when it returns
+  /// (LOG-10); a failure (for example joining a workspace that was just
+  /// discarded) is logged and shown (LOG-11).
   void _sessionAction(
     BuildContext context,
     String operation,
-    void Function() action,
-  ) {
+    void Function() action, {
+    required String succeeded,
+    Map<String, Object?> arguments = const {},
+  }) {
     try {
       action();
+      unawaited(_logger.info(succeeded, arguments: arguments));
     } catch (error, stackTrace) {
       unawaited(_reportSessionError(context, operation, error, stackTrace));
     }
@@ -724,6 +852,7 @@ class _PainterAppState extends State<PainterApp> {
     // can be freed right after.
     final network = _network;
     if (network != null) unawaited(network.leave());
+    _lifecycle.dispose();
     _settings.dispose();
     for (final renderer in _renderers.values) {
       renderer.dispose();
@@ -753,9 +882,14 @@ class _PainterAppState extends State<PainterApp> {
   Future<void> _openDocument(BuildContext context) async {
     if (_fileOperationInProgress) return;
     setState(() => _fileOperationInProgress = true);
+    String? path;
     try {
-      final path = await _fileService.chooseOpenPath(context);
-      if (path == null || !mounted) return;
+      path = await _fileService.chooseOpenPath(context);
+      if (path == null) {
+        unawaited(_logger.debug('document.open.cancelled'));
+        return;
+      }
+      if (!mounted) return;
       final bytes = await _fileService.readDocument(path);
       final file = DocumentFileContents.read(bytes, _backend);
       if (!mounted) {
@@ -764,12 +898,35 @@ class _PainterAppState extends State<PainterApp> {
       }
       _replaceContent(file.content);
       _preservedSections = file.sections;
-      if (_settings.settings.loadStoredWorkspaces) {
-        _workspace.applyJson(file.workspaceSection);
-      }
+      final storedUnusable =
+          _settings.settings.loadStoredWorkspaces &&
+          !_workspace.applyJson(file.workspaceSection) &&
+          file.hasWorkspaceSection;
       _documentPath = path;
+      unawaited(
+        _logger.info('document.open.succeeded', arguments: {'path': path}),
+      );
+      if (file.content.unreadableOnAdopt > 0) {
+        unawaited(
+          _logger.warn(
+            'document.strokes.unreadable',
+            arguments: {
+              'count': file.content.unreadableOnAdopt,
+              'source': path,
+            },
+          ),
+        );
+      }
+      if (storedUnusable) {
+        unawaited(
+          _logger.warn(
+            'workspace.stored.unusable',
+            arguments: {'source': path},
+          ),
+        );
+      }
     } catch (error, stackTrace) {
-      await _logFileOperationError('open', error, stackTrace);
+      await _logFileOperationError('open', error, stackTrace, path: path);
       if (context.mounted) {
         await _showFileOperationError(context, 'open', error, stackTrace);
       }
@@ -782,20 +939,28 @@ class _PainterAppState extends State<PainterApp> {
   ///
   /// Mirrors [_openDocument] (same in-flight guard, then record the failure
   /// before showing details if the action context remains mounted). If a
-  /// path is already associated the picker is skipped; cancelling it aborts
-  /// silently (DOCF-8).
+  /// path is already associated the picker is skipped; cancelling it changes
+  /// nothing and is logged as a debug record (DOCF-8, LOG-12).
   Future<void> _saveDocument(BuildContext context) async {
     if (_fileOperationInProgress) return;
     setState(() => _fileOperationInProgress = true);
+    String? path;
     try {
-      var path = _documentPath;
+      path = _documentPath;
       path ??= await _fileService.chooseSavePath(context, 'Untitled.paint');
-      if (path == null || !mounted) return;
+      if (path == null) {
+        unawaited(_logger.debug('document.save.cancelled'));
+        return;
+      }
+      if (!mounted) return;
       final bytes = DocumentFileContents.encode(_content, _preservedSections);
       await _fileService.writeDocument(path, bytes);
       if (mounted) _documentPath = path;
+      unawaited(
+        _logger.info('document.save.succeeded', arguments: {'path': path}),
+      );
     } catch (error, stackTrace) {
-      await _logFileOperationError('save', error, stackTrace);
+      await _logFileOperationError('save', error, stackTrace, path: path);
       if (context.mounted) {
         await _showFileOperationError(context, 'save', error, stackTrace);
       }
@@ -831,8 +996,11 @@ class _PainterAppState extends State<PainterApp> {
         _preservedSections,
         section,
       );
+      unawaited(
+        _logger.info('document.flash.succeeded', arguments: {'path': path}),
+      );
     } catch (error, stackTrace) {
-      await _logFileOperationError('flash', error, stackTrace);
+      await _logFileOperationError('flash', error, stackTrace, path: path);
       if (context.mounted) {
         await _showFileOperationError(context, 'flash', error, stackTrace);
       }
@@ -841,17 +1009,23 @@ class _PainterAppState extends State<PainterApp> {
     }
   }
 
-  /// Records a failed open/save before any mounted-context check.
+  /// Records a failed open, save or flash, naming [path] when one was chosen
+  /// (LOG-11), before any mounted-context check.
   ///
   /// This keeps failures in the shared history if the pane was removed while
   /// I/O was pending.
   Future<void> _logFileOperationError(
     String operation,
     Object error,
-    StackTrace stackTrace,
-  ) => _logger.error(
+    StackTrace stackTrace, {
+    required String? path,
+  }) => _logger.error(
     'document.operation.failed',
-    arguments: {'operation': operation, 'error': error.toString()},
+    arguments: {
+      'operation': operation,
+      'error': error.toString(),
+      'path': ?path,
+    },
     stackTrace: stackTrace.toString(),
   );
 

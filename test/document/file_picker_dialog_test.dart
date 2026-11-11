@@ -1,6 +1,8 @@
 // What: Widget tests of InAppFilePicker on its own: listing only directories
 //   and `.paint` files, open mode (tap a file, navigate into a directory),
-//   save mode (typed name gets `.paint` appended), and cancel returning null.
+//   save mode (typed name gets `.paint` appended), cancel returning null,
+//   and a directory that cannot be listed being reported to the caller for
+//   the log (docs/spec/logging.md LOG-13).
 // Why: docs/design/document/file-format-and-flow.md replaced the native file
 //   dialogs with this in-house picker so the Open/Save flow can be driven
 //   headlessly. This file tests the part that replaces the native file
@@ -13,8 +15,8 @@
 //
 // Each test runs against a throwaway directory tree (see setUp) so the
 // picker's real dart:io directory listing is exercised, not a mock. Not
-// verified: the picker's default start directory in the real service, going
-// up a directory, or behavior on unreadable directories.
+// verified: the picker's default start directory in the real service, or
+// going up a directory.
 
 import 'dart:io';
 
@@ -48,6 +50,8 @@ void main() {
     WidgetTester tester, {
     required FilePickerMode mode,
     String suggestedName = '',
+    Directory? startDirectory,
+    void Function(String path, Object error)? onListError,
   }) async {
     late Future<String?> pending;
     await tester.pumpWidget(
@@ -59,8 +63,9 @@ void main() {
                 pending = InAppFilePicker.show(
                   context,
                   mode: mode,
-                  startDirectory: root,
+                  startDirectory: startDirectory ?? root,
                   suggestedName: suggestedName,
+                  onListError: onListError,
                 );
               },
               child: const Text('open picker'),
@@ -135,5 +140,23 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(await pending, isNull);
+  });
+
+  testWidgets('a directory that cannot be listed is shown and reported '
+      '(LOG-13)', (tester) async {
+    final missing = Directory('${root.path}/missing');
+    final reported = <String>[];
+    await openPicker(
+      tester,
+      mode: FilePickerMode.open,
+      startDirectory: missing,
+      onListError: (path, error) => reported.add(path),
+    );
+
+    expect(reported, [missing.path]);
+    expect(
+      find.textContaining('Could not list ${missing.path}'),
+      findsOneWidget,
+    );
   });
 }

@@ -4,9 +4,12 @@
 //   panes; it edits PainterSettings through the shared controller and leaves
 //   persistence and app-wide ThemeData ownership to the app shell.
 // Coupled to: painter_settings.dart (palette/controller), main.dart (pane host),
-//   and contextual_help.dart (accessible settings controls).
+//   contextual_help.dart (accessible settings controls), and
+//   ../logging/painter_log.dart (a record per changed setting or failed save,
+//   docs/spec/logging.md LOG-10, LOG-11).
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
@@ -39,11 +42,27 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
   Future<void> _save(PainterSettings settings) =>
       _persist(() => widget.controller.update(settings));
 
-  /// Runs a controller write, reporting success or failure in the notice line.
+  /// Runs a controller write, reporting success or failure in the notice line
+  /// and the log: an info record per setting the write changed (LOG-10), or
+  /// an error record (LOG-11).
   Future<void> _persist(Future<void> Function() write) async {
     setState(() => _notice = null);
+    final before = widget.controller.settings.toJson();
     try {
       await write();
+      final after = widget.controller.settings.toJson();
+      for (final entry in after.entries) {
+        if (jsonEncode(before[entry.key]) == jsonEncode(entry.value)) continue;
+        unawaited(
+          widget.logger.info(
+            'settings.change.succeeded',
+            arguments: {
+              'setting': entry.key,
+              'value': _describeSetting(entry.key, entry.value),
+            },
+          ),
+        );
+      }
       if (mounted) setState(() => _notice = 'Settings saved');
     } catch (error, stackTrace) {
       await widget.logger.error(
@@ -53,6 +72,19 @@ class _ThemeSettingsPaneState extends State<ThemeSettingsPane> {
       );
       if (mounted) setState(() => _notice = 'Could not save settings: $error');
     }
+  }
+
+  /// A short text for a setting's new [value]: custom themes by name, since
+  /// their colors would make a record unreadable.
+  static String _describeSetting(String key, Object value) {
+    if (key == 'customThemes' && value is List) {
+      final names = [
+        for (final theme in value)
+          if (theme is Map) '${theme['name']}',
+      ];
+      return names.isEmpty ? 'none' : names.join(', ');
+    }
+    return '$value';
   }
 
   /// Opens the color editor and adds the completed custom palette to settings.

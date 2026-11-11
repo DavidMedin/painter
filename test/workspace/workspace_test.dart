@@ -7,7 +7,9 @@
 // Why: The pane UI is a thin layer over this model, so the behavior the specs
 //   promise (PANE-13 to PANE-16, PANE-20, PANE-26, PANE-27, CNVS-6,
 //   WKSP-11, WKSP-12, WKSP-33, PNT-A0015-05, PNT-A0015-07) is tested here
-//   without widgets. Timing tests run under testWidgets for its fake clock.
+//   without widgets, as are a Log pane's lowest Severity (LOG-22, LOG-23,
+//   PNT-A0020-08) and the one debug record per local edit (LOG-19, LOG-20).
+//   Timing tests run under testWidgets for its fake clock.
 // Covers: lib/workspace/workspace.dart (and its use of layout_ops.dart,
 //   layout_flash.dart and CanvasViewportController).
 
@@ -16,6 +18,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:painter/canvas/canvas_viewport.dart';
 import 'package:painter/crdt/crdt_document.dart';
+import 'package:painter/logging/painter_log.dart';
 import 'package:painter/session/session_document.dart';
 import 'package:painter/help/manual_catalog.dart';
 import 'package:painter/workspace/layout_tree.dart';
@@ -150,6 +153,70 @@ void main() {
 
       workspace.moveSplitter(workspace.splitters.single, -2);
       expect(workspace.rectOf(left).width, closeTo(0.1, 1e-9));
+    });
+  });
+
+  group('Log panes', () {
+    test('list every Severity until one is chosen, and keep the choice in '
+        'the section (LOG-22, LOG-23, PNT-A0020-08)', () {
+      final session = sessionWithDefaultWorkspace();
+      final workspace = openWorkspace(session: session);
+      final id = workspace.paneIds.single;
+      workspace.setKind(id, PaneKind.log);
+      expect(workspace.logLowest(id), PainterLogLevel.trace);
+
+      workspace.setLogLowest(id, PainterLogLevel.warn);
+      expect(workspace.logLowest(id), PainterLogLevel.warn);
+      expect(_stored(session, id, 'log'), {'lowest': 'warn'});
+
+      final restored = openWorkspace();
+      expect(restored.applyJson(workspace.toJson()), isTrue);
+      expect(restored.logLowest(restored.paneIds.single), PainterLogLevel.warn);
+    });
+  });
+
+  group('edit records', () {
+    test('each local edit makes one debug record, a whole splitter drag '
+        'included, and peers make none (LOG-19, LOG-20)', () {
+      final log = PainterLog.memory();
+      addTearDown(log.dispose);
+      final a = sessionWithDefaultWorkspace();
+      final b = replicaOf(a);
+      final workspace = openWorkspace(session: a, log: log);
+      final left = workspace.paneIds.single;
+
+      final right = workspace.add(left, PaneEdge.right)!;
+      workspace.setKind(right, PaneKind.manual);
+      workspace.swap(left, PaneEdge.right);
+      for (var step = 0; step < 5; step++) {
+        workspace.moveSplitter(workspace.splitters.single, 0.01);
+      }
+      workspace.finishSplitterDrag();
+      workspace.join(left, PaneEdge.right);
+      workspace.openPane(PaneKind.session);
+      // A refused edit and a peer's edit are not the user's edits.
+      workspace.join(workspace.paneIds.first, PaneEdge.left);
+      final onB = openWorkspace(session: b);
+      syncAll([a, b]);
+      onB.add(onB.paneIds.first, PaneEdge.bottom);
+      syncAll([a, b]);
+
+      expect(
+        [for (final entry in log.entries) entry.messageId],
+        [
+          'workspace.pane.added',
+          'workspace.mode.changed',
+          'workspace.pane.swapped',
+          'workspace.splitter.moved',
+          'workspace.pane.joined',
+          'workspace.pane.opened',
+        ],
+      );
+      expect(
+        log.entries.every((entry) => entry.level == PainterLogLevel.debug),
+        isTrue,
+      );
+      expect(log.entries[1].arguments, {'mode': 'Manual'});
     });
   });
 
@@ -514,7 +581,13 @@ void main() {
       }),
       'state for a mode without state': _single({
         'mode': 'canvas',
-        'state': {'log': <String, Object?>{}},
+        'state': {'session': <String, Object?>{}},
+      }),
+      'unknown log severity': _single({
+        'mode': 'log',
+        'state': {
+          'log': {'lowest': 'fatal'},
+        },
       }),
       'extent out of range': _single({
         'mode': 'canvas',

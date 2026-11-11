@@ -21,7 +21,11 @@
 //   keeps dialing until the mesh is complete; two peers that lose each other
 //   but share a third stop writing `host` and clear the `left` marks they
 //   set on each other; malformed frames, frames out of order and a wrong
-//   protocol version are rejected.
+//   protocol version are rejected. Each Participant's log
+//   (docs/spec/logging.md) records others joining (LOG-15) but not those
+//   already there when it joined, nothing per sync message (LOG-20), a
+//   timeout and the leave it causes (LOG-15, LOG-16), Host changes (LOG-18),
+//   refusals (LOG-17), and malformed messages (LOG-13).
 //   Conditions are awaited by polling with a deadline, never fixed sleeps,
 //   except where a test checks that nothing happens for a while.
 
@@ -30,6 +34,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:painter/logging/painter_log.dart';
 import 'package:painter/session/session_network.dart';
 import 'package:painter/session/session_protocol.dart';
 
@@ -181,6 +186,12 @@ void main() {
     expect(a.hostId, a.id);
     expect(b.hostId, a.id);
     expect(a.session.participant(b.id)!.name, 'Bo');
+
+    // LOG-15 and LOG-20: one record for Bo joining, none per sync message,
+    // and Bo does not report Ann, who was there before Bo joined.
+    expect(a.logged(PainterLogLevel.info), ['session.participant.joined']);
+    expect(a.loggedParticipants('session.participant.joined'), ['Bo']);
+    expect(b.log.entries, isEmpty);
   });
 
   test(
@@ -236,6 +247,13 @@ void main() {
       expect(d.session.participants, isEmpty);
       expect(a.session.participants.map((p) => p.id), [a.id]);
       expect(a.network.presentIds, {a.id});
+      // LOG-17: the refusing side records who and why.
+      expect(a.logged(PainterLogLevel.warn), ['session.join.refused']);
+      expect(a.loggedParticipants('session.join.refused'), ['Dee']);
+      expect(
+        a.log.entries.last.arguments['reason'],
+        contains('Engine version 2 differs from 1'),
+      );
     },
   );
 
@@ -370,6 +388,13 @@ void main() {
     );
     expect(a.session.hasWorkspace(annWorkspace), isTrue);
     expect(a.session.localParticipant!.left, isFalse);
+
+    // LOG-16, LOG-15 and LOG-18 as Ann saw it: Bo timed out (a warning)
+    // and left, and the Host went to Bo by promotion and back to Ann.
+    expect(a.logged(PainterLogLevel.warn), ['session.participant.timed_out']);
+    expect(a.loggedParticipants('session.participant.timed_out'), ['Bo']);
+    expect(a.loggedParticipants('session.participant.left'), ['Bo']);
+    expect(a.loggedParticipants('session.host.changed'), ['Bo', 'Ann']);
   });
 
   test('a peer whose socket dies without bye is dropped at once and marked '
@@ -472,5 +497,13 @@ void main() {
     expect(a.session.participants.map((p) => p.id), [a.id]);
     expect(a.network.presentIds, {a.id});
     expect(a.network.isActive, isTrue);
+    // LOG-13 for the two frames that cannot be decoded, LOG-17 for the
+    // wrong protocol; frames that decode but come out of order are not
+    // malformed.
+    expect(a.logged(PainterLogLevel.warn), [
+      'session.message.malformed',
+      'session.message.malformed',
+      'session.join.refused',
+    ]);
   });
 }

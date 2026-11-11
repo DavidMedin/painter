@@ -7,8 +7,9 @@
 // Coupled to: ../canvas/canvas_controller.dart (onGestureCompleted,
 //   strokeInProgress, removeStrokes, insertStrokes), content_document.dart
 //   (ContentDocument.transact makes each undo or redo one commit; see its
-//   overview), and ../main.dart (Undo and Redo buttons and shortcuts, one
-//   history per attached document).
+//   overview), ../logging/painter_log.dart (a debug record per finished
+//   gesture, undo and redo, docs/spec/logging.md LOG-19), and ../main.dart
+//   (Undo and Redo buttons and shortcuts, one history per attached document).
 //
 // How it works: CanvasController reports each finished gesture with the
 // strokes it added; they are kept as one UndoEdit, which holds the immutable
@@ -22,11 +23,13 @@
 // history belongs to one document: ../main.dart makes a new one when the
 // document is replaced (PNT-A0018-05).
 
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 
 import '../canvas/canvas_controller.dart';
+import '../logging/painter_log.dart';
 import 'content_document.dart';
 
 /// One local pointer gesture: the strokes it added, one per committed chunk
@@ -50,11 +53,13 @@ class UndoEdit {
 class EditHistory extends ChangeNotifier {
   /// Starts recording [controller]'s gestures (it sets
   /// `CanvasController.onGestureCompleted`); [content] must be the document
-  /// [controller] draws.
+  /// [controller] draws. [log] receives a debug record for each finished
+  /// gesture, undo and redo (LOG-19); never one per pointer event (LOG-20).
   EditHistory({
     required this.controller,
     required this.content,
     this.capacity = defaultCapacity,
+    this.log,
   }) {
     controller.onGestureCompleted = _record;
     content.onRestamped = _restamp;
@@ -68,6 +73,8 @@ class EditHistory extends ChangeNotifier {
 
   /// The most edits kept; the oldest is dropped beyond it.
   final int capacity;
+
+  final PainterLog? log;
 
   final ListQueue<UndoEdit> _undo = ListQueue();
   final List<UndoEdit> _redo = [];
@@ -98,6 +105,7 @@ class EditHistory extends ChangeNotifier {
     );
     _redo.add(edit);
     notifyListeners();
+    _logEdit('document.undo.succeeded');
     return true;
   }
 
@@ -119,6 +127,7 @@ class EditHistory extends ChangeNotifier {
     );
     _push(edit);
     notifyListeners();
+    _logEdit('document.redo.succeeded');
     return true;
   }
 
@@ -146,6 +155,12 @@ class EditHistory extends ChangeNotifier {
     );
     _redo.clear();
     notifyListeners();
+    _logEdit('document.stroke.finished', {'chunks': strokes.length});
+  }
+
+  void _logEdit(String messageId, [Map<String, Object?> arguments = const {}]) {
+    final log = this.log;
+    if (log != null) unawaited(log.debug(messageId, arguments: arguments));
   }
 
   /// Replaces strokes in both stacks by their [restamped] versions, so redo

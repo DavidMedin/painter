@@ -16,6 +16,8 @@
 //   paths), ../crdt/crdt_document.dart (writes and change notifications),
 //   ../canvas/canvas_viewport.dart (a Canvas pane's
 //   view), ../help/manual_catalog.dart (a Manual pane's page),
+//   ../logging/painter_log.dart (a Log pane's lowest Severity, and the debug
+//   record of each local edit, docs/spec/logging.md LOG-19),
 //   ../ui/pane_system.dart (draws a Workspace) and ../main.dart (creates one
 //   per workspace the local Participant is a Member of, applies and flashes
 //   sections, builds a joiner's first node table with
@@ -65,6 +67,7 @@ import 'package:flutter/foundation.dart';
 import '../canvas/canvas_viewport.dart';
 import '../crdt/crdt_document.dart';
 import '../help/manual_catalog.dart';
+import '../logging/painter_log.dart';
 import '../session/session_document.dart';
 import 'layout_flash.dart';
 import 'layout_ops.dart';
@@ -136,12 +139,15 @@ class Workspace extends ChangeNotifier {
   /// it is given the disposal and runs it once the widgets showing those
   /// panes have detached, so a pointer event arriving before the rebuild
   /// cannot reach a disposed controller. main.dart passes a post-frame
-  /// callback; null disposes at once, for models without widgets.
+  /// callback; null disposes at once, for models without widgets. [log]
+  /// receives a debug record for each local edit made through this model
+  /// (LOG-19); edits from peers are not recorded here.
   Workspace({
     required SessionDocument session,
     required this.workspaceId,
     this.onPaneRemoved,
     this.afterDetach,
+    this.log,
   }) : _session = session,
        _document = session.document,
        _nodesPath = SessionDocument.nodesPath(workspaceId),
@@ -162,6 +168,8 @@ class Workspace extends ChangeNotifier {
   final ValueChanged<String>? onPaneRemoved;
 
   final void Function(VoidCallback dispose)? afterDetach;
+
+  final PainterLog? log;
 
   final SessionDocument _session;
   final CrdtDocument _document;
@@ -197,6 +205,10 @@ class Workspace extends ChangeNotifier {
   /// True while a stored view is copied into a live controller, so that the
   /// change is not mistaken for a local one and written back.
   bool _applyingStoredView = false;
+
+  /// Whether [moveSplitter] changed the layout since the last
+  /// [finishSplitterDrag].
+  bool _splitterMoved = false;
 
   Timer? _commitTimer;
 
@@ -260,13 +272,34 @@ class Workspace extends ChangeNotifier {
     );
   }
 
+  /// The lowest Severity Log pane [id] lists (LOG-22): its Log state
+  /// `{"lowest": name}` (docs/decisions/014-logging.md PNT-A0020-08), or
+  /// `trace`, which lists every record, when it has none (LOG-23).
+  PainterLogLevel logLowest(String id) {
+    final state = _layout.pane(id)?.state[PaneKind.log.name];
+    final lowest = state is Map ? state['lowest'] : null;
+    return PainterLogLevel.values.asNameMap()[lowest] ?? PainterLogLevel.trace;
+  }
+
+  /// Selects [level] as the lowest Severity Log pane [id] lists.
+  void setLogLowest(String id, PainterLogLevel level) {
+    if (_layout.pane(id) == null || logLowest(id) == level) return;
+    _edit(
+      (layout) => _planner.setModeState(layout, id, PaneKind.log.name, {
+        'lowest': level.name,
+      }),
+    );
+  }
+
   /// Puts pane [id] in [kind]; the states of every mode stay in the pane
   /// (PANE-20).
   void setKind(String id, PaneKind kind) {
     if (_layout.pane(id) == null || _layout.pane(id)!.mode == kind.name) {
       return;
     }
-    _edit((layout) => _planner.setMode(layout, id, kind.name));
+    if (_edit((layout) => _planner.setMode(layout, id, kind.name))) {
+      _logEdit('workspace.mode.changed', {'mode': kind.label});
+    }
   }
 
   /// Whether 'add' is enabled on [edge] of pane [id] (PANE-27).
@@ -291,19 +324,28 @@ class Workspace extends ChangeNotifier {
       if (writes != null) added = _addedPane(writes);
       return writes;
     });
+    if (added case final pane?) {
+      _logEdit('workspace.pane.added', {'mode': kindOf(pane).label});
+    }
     return added;
   }
 
   /// Joins the Neighbor across [edge] into pane [id] (PANE-15). Returns
   /// whether the join was allowed (PANE-14, PANE-25).
-  bool join(String id, PaneEdge edge) =>
-      _edit((layout) => _planner.join(layout, id, edge));
+  bool join(String id, PaneEdge edge) {
+    final joined = _edit((layout) => _planner.join(layout, id, edge));
+    if (joined) _logEdit('workspace.pane.joined');
+    return joined;
+  }
 
   /// Exchanges the mode and Per-mode states of pane [id] and its Neighbor
   /// across [edge], leaving both rectangles unchanged (PANE-16). Returns
   /// whether a Neighbor existed.
-  bool swap(String id, PaneEdge edge) =>
-      _edit((layout) => _planner.swap(layout, id, edge));
+  bool swap(String id, PaneEdge edge) {
+    final swapped = _edit((layout) => _planner.swap(layout, id, edge));
+    if (swapped) _logEdit('workspace.pane.swapped');
+    return swapped;
+  }
 
   /// Every splitter of the shown layout.
   List<LayoutSplitter> get splitters => _layout.splitters;
@@ -317,8 +359,17 @@ class Workspace extends ChangeNotifier {
   void moveSplitter(LayoutSplitter splitter, double delta) {
     final writes = _planner.moveSplitter(_layout, splitter, delta);
     if (writes == null || writes.isEmpty) return;
+    _splitterMoved = true;
     _stage(writes);
     _scheduleCommit();
+  }
+
+  /// Ends a splitter drag: records one debug record for the whole drag if
+  /// [moveSplitter] changed the layout during it (LOG-19, LOG-20).
+  void finishSplitterDrag() {
+    if (!_splitterMoved) return;
+    _splitterMoved = false;
+    _logEdit('workspace.splitter.moved');
   }
 
   /// Shows [helpId] in a Manual pane: the first existing one, else a pane
@@ -376,6 +427,7 @@ class Workspace extends ChangeNotifier {
         ..._planner.setModeState(_layout, id, kind.name, state)!,
     ]);
     _commitNow();
+    _logEdit('workspace.pane.opened', {'mode': kind.label});
     return id;
   }
 
@@ -478,6 +530,12 @@ class Workspace extends ChangeNotifier {
     if (writes != null) _stage(writes);
     _commitNow();
     return writes != null;
+  }
+
+  /// Adds a debug record of a local edit to [log], if any (LOG-19).
+  void _logEdit(String messageId, [Map<String, Object?> arguments = const {}]) {
+    final log = this.log;
+    if (log != null) unawaited(log.debug(messageId, arguments: arguments));
   }
 
   /// Writes [writes] to the document without committing, applies them to the
@@ -640,8 +698,9 @@ class Workspace extends ChangeNotifier {
 
   /// Whether a section's [state] for [mode] is one this build can read
   /// (docs/spec/workspace.md, Unusable): a Canvas view
-  /// (docs/decisions/011-relative-canvas-view.md) or a Manual page name.
-  /// Modes that keep no state accept none.
+  /// (docs/decisions/011-relative-canvas-view.md), a Manual page name, or a
+  /// Log pane's lowest Severity (PNT-A0020-08). Modes that keep no state
+  /// accept none.
   static bool _isUsableState(String mode, Map<String, Object?> state) {
     switch (PaneKind.values.asNameMap()[mode]) {
       case PaneKind.canvas:
@@ -650,9 +709,10 @@ class Workspace extends ChangeNotifier {
         return view != null;
       case PaneKind.manual:
         return HelpId.values.asNameMap().containsKey(state['help']);
+      case PaneKind.log:
+        return PainterLogLevel.values.asNameMap().containsKey(state['lowest']);
       case PaneKind.diagnostics ||
           PaneKind.settings ||
-          PaneKind.log ||
           PaneKind.session ||
           null:
         return false;

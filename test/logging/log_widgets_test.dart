@@ -1,7 +1,11 @@
-// What: Widget tests for the latest-entry bar, chronological Log pane, and app
-//   route.
-// Why: The shared log history must stay visible at the bottom of the shell and
-//   selectable pane, with the newest record at the scroll bottom.
+// What: Widget tests for the latest-entry bar, chronological Log pane, its
+//   lowest-Severity filter, and app route.
+// Why: The shared log history must stay visible at the bottom of the shell
+//   (docs/spec/logging.md LOG-7) and in a selectable pane, with the newest
+//   record at the scroll bottom (LOG-8). Each Log pane lists records at or
+//   above its own lowest Severity, every Severity at first, without hiding
+//   anything from other panes, the status bar or the history (LOG-22,
+//   LOG-23, docs/decisions/014-logging.md PNT-A0020-07).
 // Covers: lib/logging/log_widgets.dart and lib/main.dart Log-pane wiring.
 
 import 'package:flutter/gestures.dart';
@@ -143,6 +147,82 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LogPane), findsOneWidget);
-    expect(find.text('Painter started.'), findsNWidgets(2));
+    // The pane lists the start; the status bar shows the newest record, the
+    // mode change itself (LOG-7, LOG-19), which the pane lists too.
+    expect(find.text('Painter started.'), findsOneWidget);
+    expect(find.text('Changed a pane to Log.'), findsNWidgets(2));
+  });
+
+  testWidgets('a lowest Severity hides lower records in that pane only '
+      '(LOG-8, LOG-22)', (tester) async {
+    final log = PainterLog.memory();
+    addTearDown(log.dispose);
+    final selected = <PainterLogLevel>[];
+    await log.debug('entry.debug');
+    await log.info('entry.info');
+    await log.warn('entry.warn');
+    await log.error('entry.error');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LogPane(
+            log: log,
+            lowest: PainterLogLevel.warn,
+            onLowestChanged: selected.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('[entry.debug]'), findsNothing);
+    expect(find.text('[entry.info]'), findsNothing);
+    expect(find.text('[entry.warn]'), findsOneWidget);
+    expect(find.text('[entry.error]'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('log-lowest-severity')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DEBUG').last);
+    await tester.pumpAndSettle();
+    expect(selected, [PainterLogLevel.debug]);
+  });
+
+  testWidgets('in the app, each Log pane keeps its own lowest Severity, '
+      'starting at TRACE (LOG-22, LOG-23)', (tester) async {
+    final log = PainterLog.memory();
+    addTearDown(log.dispose);
+    await log.warn('settings.load.invalid', arguments: {'problem': 'test'});
+    await tester.pumpWidget(PainterApp(logger: log));
+    await tester.tap(find.byType(DropdownButton<PaneKind>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Log'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('frame-right-add-0')));
+    await tester.pumpAndSettle();
+    expect(find.byType(LogPane), findsNWidgets(2));
+
+    Finder inPane(int index, String text) => find.descendant(
+      of: find.byType(LogPane).at(index),
+      matching: find.text(text),
+    );
+    // Both panes start at TRACE and list the debug record of the mode
+    // change.
+    expect(inPane(0, 'TRACE'), findsOneWidget);
+    expect(inPane(0, 'Changed a pane to Log.'), findsOneWidget);
+    final recorded = log.entries.length;
+
+    await tester.tap(find.byKey(const ValueKey('log-lowest-severity')).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('WARN').last);
+    await tester.pumpAndSettle();
+
+    expect(inPane(0, 'Changed a pane to Log.'), findsNothing);
+    expect(
+      inPane(0, 'Used a default in place of stored settings: test.'),
+      findsOneWidget,
+    );
+    expect(inPane(1, 'TRACE'), findsOneWidget);
+    expect(inPane(1, 'Changed a pane to Log.'), findsOneWidget);
+    expect(log.entries, hasLength(recorded), reason: 'the history is whole');
   });
 }

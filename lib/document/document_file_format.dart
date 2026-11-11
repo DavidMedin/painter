@@ -87,9 +87,7 @@ class DocumentContainer {
       throw const FormatException('Not a Painter document file.');
     }
     if (bytes.length < _headerBytes) {
-      throw const FormatException(
-        'The document file ends before its version.',
-      );
+      throw const FormatException('The document file ends before its version.');
     }
     final data = ByteData.sublistView(bytes);
     final fileVersion = data.getUint32(8, Endian.little);
@@ -163,6 +161,12 @@ class DocumentFileContents {
   /// model judges that.
   Object? get workspaceSection => workspaceJson(sections);
 
+  /// Whether the file has a workspace section at all, readable or not; an
+  /// unreadable one makes [workspaceSection] null as no section does.
+  bool get hasWorkspaceSection => sections.any(
+    (section) => section.kind == DocumentContainer.workspaceKind,
+  );
+
   /// Reads [bytes]: a format 2 file, or else an earlier-format JSON file,
   /// imported into a new content document from [backend] (PNT-A0014-08)
   /// whose workspace value becomes a kind 2 section.
@@ -186,10 +190,7 @@ class DocumentFileContents {
         '${contentSections.length}.',
       );
     }
-    final content = ContentDocument.load(
-      backend,
-      contentSections.single.bytes,
-    );
+    final content = ContentDocument.load(backend, contentSections.single.bytes);
     return DocumentFileContents(content, [
       for (final section in container.sections)
         if (section.kind != DocumentContainer.contentKind) section,
@@ -223,6 +224,9 @@ class DocumentFileContents {
       try {
         return jsonDecode(utf8.decode(section.bytes));
       } on FormatException {
+        // Not a failure here: an undecodable section is Unusable, like one
+        // that decodes to something unreadable. Callers that apply a present
+        // section report it as unusable (docs/spec/logging.md LOG-13).
         return null;
       }
     }
@@ -259,9 +263,8 @@ class DocumentFileContents {
   static Uint8List withWorkspaceSection(Uint8List bytes, Object? workspace) {
     if (DocumentContainer.hasMagic(bytes)) {
       final container = DocumentContainer.parse(bytes);
-      return DocumentContainer(
-        withWorkspace(container.sections, workspace),
-      ).encode();
+      return DocumentContainer(withWorkspace(container.sections, workspace))
+          .encode();
     }
     final json = jsonDecode(utf8.decode(bytes));
     if (json is! Map<String, dynamic>) {

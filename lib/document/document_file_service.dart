@@ -97,6 +97,12 @@ abstract class DocumentFileService {
 /// The production [DocumentFileService]: picks files through
 /// [InAppFilePicker], an in-app dialog, rather than a native file picker.
 class InAppDocumentFileService extends DocumentFileService {
+  /// [onListError] is passed to every picker: told when a directory cannot
+  /// be listed (InAppFilePicker.onListError).
+  InAppDocumentFileService({this.onListError});
+
+  final void Function(String path, Object error)? onListError;
+
   /// Where the picker opens: the user's home directory (`$HOME`), or the
   /// process's current directory if `$HOME` is unset.
   Directory _startDirectory() {
@@ -110,6 +116,7 @@ class InAppDocumentFileService extends DocumentFileService {
       context,
       mode: FilePickerMode.open,
       startDirectory: _startDirectory(),
+      onListError: onListError,
     );
   }
 
@@ -120,6 +127,7 @@ class InAppDocumentFileService extends DocumentFileService {
       mode: FilePickerMode.save,
       startDirectory: _startDirectory(),
       suggestedName: suggestedName,
+      onListError: onListError,
     );
   }
 }

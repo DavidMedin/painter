@@ -14,15 +14,22 @@ class SharedPreferencesPainterSettingsStore {
   static const _key = 'painter.settings.v1';
 
   /// Loads saved settings, or built-in defaults when no valid record exists.
-  Future<PainterSettings> load() async {
+  /// [onInvalid] is told about each part replaced by a default
+  /// (docs/spec/logging.md LOG-13; see PainterSettings.fromJson).
+  Future<PainterSettings> load({
+    void Function(String problem)? onInvalid,
+  }) async {
     final preferences = await SharedPreferences.getInstance();
     final stored = preferences.getString(_key);
     if (stored == null) return PainterSettings.defaults;
+    final Object? json;
     try {
-      return PainterSettings.fromJson(jsonDecode(stored));
-    } on FormatException {
+      json = jsonDecode(stored);
+    } on FormatException catch (error) {
+      onInvalid?.call('the settings record is not JSON: ${error.message}');
       return PainterSettings.defaults;
     }
+    return PainterSettings.fromJson(json, onInvalid: onInvalid);
   }
 
   /// Replaces the stored settings record atomically at the preference level.

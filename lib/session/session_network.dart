@@ -9,7 +9,10 @@
 // Coupled to: session_protocol.dart (frames), session_document.dart (schema
 //   writes: joining, addresses, left, host, discarding workspaces),
 //   session_roster.dart (presence and the Host rule),
-//   ../crdt/crdt_document.dart (sync messages and listeners).
+//   ../crdt/crdt_document.dart (sync messages and listeners),
+//   ../logging/painter_log.dart (records of Participants joining, leaving
+//   and timing out, Host changes, refusals and malformed messages,
+//   docs/spec/logging.md LOG-13, LOG-15 to LOG-18).
 //
 // ---------------------------------------------------------------------------
 // Session overview
@@ -67,6 +70,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 
 import '../crdt/crdt_document.dart';
+import '../logging/painter_log.dart';
 import '../workspace/layout_tree.dart' show LayoutNodes;
 import 'session_document.dart';
 import 'session_protocol.dart';
@@ -122,6 +126,7 @@ final class SessionNetwork {
     required this.engine,
     this.pingInterval = const Duration(seconds: 2),
     this.peerTimeout = const Duration(seconds: 10),
+    this.log,
   });
 
   /// The content document.
@@ -142,6 +147,12 @@ final class SessionNetwork {
   /// Silence after which a peer is gone (MPLY-17); also bounds connecting
   /// and the wait for welcome.
   final Duration peerTimeout;
+
+  /// Receives this peer's view of the Session as records: other
+  /// Participants joining and leaving, timeouts, the Host changing, joins
+  /// it refused and messages it could not read. Never one per message
+  /// (LOG-20).
+  final PainterLog? log;
 
   /// The local participant id.
   String get localId => session.localId;
@@ -203,6 +214,14 @@ final class SessionNetwork {
   /// How many participant entries were marked left at the last roster;
   /// a rise means a Participant left, so workspaces may need discarding.
   int _leftCount = 0;
+
+  /// The other listed, not-left Participants at the last roster, or null
+  /// until this peer is active; the first active roster sets it without a
+  /// record, so a joiner does not report everyone already there (LOG-15).
+  Set<String>? _loggedMembers;
+
+  /// The Host at the last roster (LOG-18).
+  String? _loggedHost;
 
   /// Listens for connections (PNT-A0019-01) on [bindAddress] (all IPv4
   /// interfaces by default) and [port] (47800, or an OS-chosen port if that
@@ -332,6 +351,8 @@ final class SessionNetwork {
     try {
       return await HttpServer.bind(address, defaultSessionPort);
     } on SocketException {
+      // Normal flow, not a failure: PNT-A0019-01 falls back to an OS-chosen
+      // port when 47800 is taken.
       return HttpServer.bind(address, 0);
     }
   }
@@ -357,13 +378,17 @@ final class SessionNetwork {
       unawaited(request.response.close());
       return;
     }
-    WebSocketTransformer.upgrade(request).then((socket) {
-      if (_closed) {
-        unawaited(socket.close());
-      } else {
-        _adopt(socket, outgoing: false);
-      }
-    }, onError: (Object _) {});
+    WebSocketTransformer.upgrade(request).then(
+      (socket) {
+        if (_closed) {
+          unawaited(socket.close());
+        } else {
+          _adopt(socket, outgoing: false);
+        }
+      },
+      onError: (Object error) =>
+          _warn('session.connection.failed', {'error': error.toString()}),
+    );
   }
 
   /// Opens a connection to [address], sends hello and waits for welcome.
@@ -497,7 +522,8 @@ final class SessionNetwork {
       frame = SessionFrame.decode(
         data is Uint8List ? data : Uint8List.fromList(data),
       );
-    } on FormatException {
+    } on FormatException catch (error) {
+      _warnMalformed(peer, error);
       _disconnect(peer);
       return;
     }
@@ -529,9 +555,20 @@ final class SessionNetwork {
         hello.participant == localId) {
       _disconnect(peer);
     } else if (hello.protocol != sessionProtocolVersion) {
-      _refuse(peer, RefuseReason.protocol);
+      _refuse(
+        peer,
+        hello,
+        RefuseReason.protocol,
+        'their protocol version ${hello.protocol} differs from '
+        '$sessionProtocolVersion',
+      );
     } else if (hello.engine != engine) {
-      _refuse(peer, RefuseReason.engine);
+      _refuse(
+        peer,
+        hello,
+        RefuseReason.engine,
+        'their Engine version ${hello.engine} differs from $engine',
+      );
     } else {
       peer.remoteId = hello.participant;
       _send(peer, WelcomeFrame(participant: localId, name: name));
@@ -539,7 +576,18 @@ final class SessionNetwork {
     }
   }
 
-  void _refuse(_Peer peer, String reason) {
+  /// Refuses [hello]'s sender for [reason] (PNT-A0019-03) and records it,
+  /// with [explanation], as a warning (LOG-17).
+  void _refuse(
+    _Peer peer,
+    HelloFrame hello,
+    String reason,
+    String explanation,
+  ) {
+    _warn('session.join.refused', {
+      'participant': hello.name,
+      'reason': explanation,
+    });
     _send(peer, RefuseFrame(reason: reason, engine: engine));
     _disconnect(peer);
   }
@@ -617,7 +665,8 @@ final class SessionNetwork {
     _receivingFrom = peer;
     try {
       _document(document).receiveSyncMessage(sync, message);
-    } on FormatException {
+    } on FormatException catch (error) {
+      _warnMalformed(peer, error);
       _disconnect(peer);
       return;
     } finally {
@@ -693,6 +742,13 @@ final class SessionNetwork {
     if (peer.closed) return;
     final remaining = peerTimeout - peer.heard.elapsed;
     if (remaining <= Duration.zero) {
+      final id = peer.remoteId;
+      if (_active && id != null && identical(_connections[id], peer)) {
+        _warn('session.participant.timed_out', {
+          'participant': _nameOf(id),
+          'seconds': peerTimeout.inSeconds,
+        });
+      }
       _disconnect(peer);
       return;
     }
@@ -738,6 +794,7 @@ final class SessionNetwork {
       present: presentIds,
     );
     _roster.value = roster;
+    _logRosterChanges(roster);
     var leftCount = 0;
     for (final member in roster.members) {
       if (member.participant.left) leftCount++;
@@ -745,6 +802,63 @@ final class SessionNetwork {
     final someoneLeft = leftCount > _leftCount;
     _leftCount = leftCount;
     _scheduleMaintenance(discard: someoneLeft);
+  }
+
+  /// Records other Participants joining or leaving (LOG-15) and the Host
+  /// changing (LOG-18) since the last roster, once this peer is active.
+  void _logRosterChanges(SessionRoster roster) {
+    if (!_active) {
+      _loggedMembers = null;
+      _loggedHost = null;
+      return;
+    }
+    final members = {
+      for (final member in roster.members)
+        if (!member.participant.left && member.participant.id != localId)
+          member.participant.id,
+    };
+    final previous = _loggedMembers;
+    final previousHost = _loggedHost;
+    _loggedMembers = members;
+    _loggedHost = roster.hostId;
+    if (previous == null) return;
+    for (final id in members.difference(previous)) {
+      _info('session.participant.joined', {'participant': _nameOf(id)});
+    }
+    for (final id in previous.difference(members)) {
+      _info('session.participant.left', {'participant': _nameOf(id)});
+    }
+    final host = roster.hostId;
+    if (host != null && host != previousHost) {
+      _info('session.host.changed', {'participant': _nameOf(host)});
+    }
+  }
+
+  /// The shown name of Participant [id], or [id] when it has none.
+  String _nameOf(String id) {
+    final participant = session.participant(id);
+    if (participant == null || participant.name.isEmpty) return id;
+    return participant.name;
+  }
+
+  /// Records that [peer] sent a message that could not be read (LOG-13);
+  /// the caller drops the connection.
+  void _warnMalformed(_Peer peer, FormatException error) {
+    final id = peer.remoteId;
+    _warn('session.message.malformed', {
+      'participant': id == null ? 'a connecting peer' : _nameOf(id),
+      'error': error.message,
+    });
+  }
+
+  void _info(String messageId, Map<String, Object?> arguments) {
+    final log = this.log;
+    if (log != null) unawaited(log.info(messageId, arguments: arguments));
+  }
+
+  void _warn(String messageId, Map<String, Object?> arguments) {
+    final log = this.log;
+    if (log != null) unawaited(log.warn(messageId, arguments: arguments));
   }
 
   /// Schedules [_maintain]; [discard] asks it to discard workspaces too,

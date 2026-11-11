@@ -1,8 +1,13 @@
-// What: The selectable Log pane and always-visible latest-entry status bar.
+// What: The selectable Log pane, with its lowest-Severity filter, and the
+//   always-visible latest-entry status bar.
 // Why: The log model is kept independent from Flutter presentation while both
-//   views observe the same ordered history from painter_log.dart.
+//   views observe the same ordered history from painter_log.dart. The filter
+//   only hides rows in one pane; the history and the file keep every record
+//   (docs/spec/logging.md LOG-8, LOG-22; docs/decisions/014-logging.md
+//   PNT-A0020-07).
 // Coupled to: painter_log.dart (records and notifications), pane_system.dart
-//   (Log Pane Mode), main.dart (application bottom bar), and contextual help.
+//   (Log Pane Mode), ../workspace/workspace.dart (stores each pane's lowest
+//   Severity), main.dart (application bottom bar), and contextual help.
 
 import 'dart:convert';
 
@@ -68,11 +73,23 @@ class LogStatusBar extends StatelessWidget {
   );
 }
 
-/// Displays records in file order, with the latest item at the scroll bottom.
+/// Displays the records at or above [lowest] in file order, with the latest
+/// item at the scroll bottom, under a control that selects [lowest].
 class LogPane extends StatefulWidget {
-  const LogPane({super.key, required this.log});
+  const LogPane({
+    super.key,
+    required this.log,
+    this.lowest = PainterLogLevel.trace,
+    this.onLowestChanged,
+  });
 
   final PainterLog log;
+
+  /// The lowest Severity listed (LOG-22); `trace` lists every record.
+  final PainterLogLevel lowest;
+
+  /// Called with the Severity the user selects; null disables the control.
+  final ValueChanged<PainterLogLevel>? onLowestChanged;
 
   @override
   State<LogPane> createState() => _LogPaneState();
@@ -91,6 +108,7 @@ class _LogPaneState extends State<LogPane> {
   @override
   void didUpdateWidget(covariant LogPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.lowest != widget.lowest) _scrollToLatest();
     if (oldWidget.log == widget.log) return;
     oldWidget.log.removeListener(_onLogChanged);
     widget.log.addListener(_onLogChanged);
@@ -118,44 +136,97 @@ class _LogPaneState extends State<LogPane> {
 
   @override
   Widget build(BuildContext context) {
+    final lowest = widget.lowest;
     final entries = widget.log.entries;
-    if (entries.isEmpty) return const Center(child: Text('No log entries'));
-    return ListView.separated(
-      controller: _scrollController,
-      itemCount: entries.length,
-      itemBuilder: (context, index) {
-        final entry = entries[index];
-        final color = _levelColor(Theme.of(context).colorScheme, entry.level);
-        return HelpTarget(
-          topic: HelpIds.logEntryDetails,
-          child: ExpansionTile(
-            key: ValueKey('log-entry-${entry.timestamp}-$index'),
-            minTileHeight: touchTargetHeight,
-            leading: Icon(Icons.circle, size: 10, color: color),
-            title: Text(entry.message),
-            subtitle: Text(
-              '${entry.timestamp.toLocal().toIso8601String()} · '
-              '${entry.level.name.toUpperCase()}',
-            ),
-            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            children: [
-              if (entry.arguments.isNotEmpty)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SelectableText(
-                    'Arguments: ${jsonEncode(entry.arguments)}',
+    // Indices into the whole history, so a row keeps its key when the
+    // filter changes.
+    final shown = [
+      for (var index = 0; index < entries.length; index++)
+        if (entries[index].level.index >= lowest.index) index,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: HelpTarget(
+            topic: HelpIds.logSeverity,
+            child: Row(
+              children: [
+                const Flexible(
+                  child: Text(
+                    'Lowest severity',
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              if (entry.stackTrace != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SelectableText(entry.stackTrace!),
+                const SizedBox(width: 12),
+                DropdownButton<PainterLogLevel>(
+                  key: const ValueKey('log-lowest-severity'),
+                  value: lowest,
+                  itemHeight: touchTargetHeight,
+                  items: [
+                    for (final level in PainterLogLevel.values)
+                      DropdownMenuItem(
+                        value: level,
+                        child: Text(level.name.toUpperCase()),
+                      ),
+                  ],
+                  onChanged: widget.onLowestChanged == null
+                      ? null
+                      : (level) {
+                          if (level != null) widget.onLowestChanged!(level);
+                        },
                 ),
-            ],
+              ],
+            ),
           ),
-        );
-      },
-      separatorBuilder: (context, index) => const Divider(height: 1),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: shown.isEmpty
+              ? const Center(child: Text('No log entries'))
+              : ListView.separated(
+                  controller: _scrollController,
+                  itemCount: shown.length,
+                  itemBuilder: (context, row) =>
+                      _entryTile(context, entries[shown[row]], shown[row]),
+                  separatorBuilder: (context, row) => const Divider(height: 1),
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// One expandable record row; [index] is its position in the history.
+  Widget _entryTile(BuildContext context, PainterLogEntry entry, int index) {
+    final color = _levelColor(Theme.of(context).colorScheme, entry.level);
+    return HelpTarget(
+      topic: HelpIds.logEntryDetails,
+      child: ExpansionTile(
+        key: ValueKey('log-entry-${entry.timestamp}-$index'),
+        minTileHeight: touchTargetHeight,
+        leading: Icon(Icons.circle, size: 10, color: color),
+        title: Text(entry.message),
+        subtitle: Text(
+          '${entry.timestamp.toLocal().toIso8601String()} · '
+          '${entry.level.name.toUpperCase()}',
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        children: [
+          if (entry.arguments.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SelectableText(
+                'Arguments: ${jsonEncode(entry.arguments)}',
+              ),
+            ),
+          if (entry.stackTrace != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SelectableText(entry.stackTrace!),
+            ),
+        ],
+      ),
     );
   }
 }

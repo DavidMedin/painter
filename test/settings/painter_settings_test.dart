@@ -1,6 +1,8 @@
 // What: Unit coverage for palette serialization, legacy keys, brightness
 //   selection, malformed data, the loadStoredWorkspaces flag, and
-//   preference-store round trips.
+//   preference-store round trips, including that every default used in
+//   place of stored data is reported for the log (docs/spec/logging.md
+//   LOG-13).
 // Why: Saved custom themes must remain loadable while current themes omit the
 //   removed canvas-paper role and retain independent light/dark palettes.
 
@@ -48,7 +50,8 @@ void main() {
     });
 
     test(
-      'ignores malformed or built-in-shadowing themes and repairs selections',
+      'ignores malformed or built-in-shadowing themes and repairs selections, '
+      'reporting each (LOG-13)',
       () {
         final valid = PainterSettings.gruvboxLight.copyWith(
           id: 'custom-valid',
@@ -64,7 +67,11 @@ void main() {
             PainterSettings.gruvboxLight.toJson(),
           ];
 
-        final restored = PainterSettings.fromJson(data);
+        final problems = <String>[];
+        final restored = PainterSettings.fromJson(
+          data,
+          onInvalid: problems.add,
+        );
 
         expect(restored.mode, ThemeMode.system);
         expect(restored.themeFor(Brightness.light).id, 'gruvbox-light');
@@ -72,8 +79,24 @@ void main() {
         expect(restored.customThemes.map((theme) => theme.id), [
           'custom-valid',
         ]);
+        expect(problems, [
+          'theme mode "unknown" is unknown',
+          'skipped a custom theme: Theme ID and name are required.',
+          'skipped custom theme "gruvbox-light": its id is already taken',
+          '"missing" is not an available light theme',
+          '"gruvbox-light" is not an available dark theme',
+        ]);
       },
     );
+
+    test('valid stored settings report nothing', () {
+      final problems = <String>[];
+      PainterSettings.fromJson(
+        PainterSettings.defaults.toJson(),
+        onInvalid: problems.add,
+      );
+      expect(problems, isEmpty);
+    });
 
     test('loadStoredWorkspaces defaults to true and round-trips JSON', () {
       expect(PainterSettings.defaults.loadStoredWorkspaces, isTrue);
@@ -160,13 +183,17 @@ void main() {
       },
     );
 
-    test('falls back to defaults for malformed preference JSON', () async {
+    test('falls back to defaults for malformed preference JSON, reporting '
+        'it (LOG-13)', () async {
       SharedPreferences.setMockInitialValues({
         'painter.settings.v1': '{not json',
       });
       final store = SharedPreferencesPainterSettingsStore();
+      final problems = <String>[];
 
-      expect((await store.load()).toJson(), PainterSettings.defaults.toJson());
+      final loaded = await store.load(onInvalid: problems.add);
+      expect(loaded.toJson(), PainterSettings.defaults.toJson());
+      expect(problems.single, startsWith('the settings record is not JSON'));
     });
   });
 }

@@ -174,6 +174,8 @@ void _workerMain(SendPort replies) {
         TransferableTypedData.fromList([batch.colors]),
       ]);
     } catch (error, stackTrace) {
+      // Forwarded, not swallowed: the main isolate rethrows this reply, and
+      // TileCache reports it through onSplatWorkerError (PNT-A0020-05).
       replies.send(<Object>[
         request[0]!,
         'error',

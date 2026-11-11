@@ -131,6 +131,16 @@ class ContentDocument {
   /// (undo_history.dart) sets it so redo puts back the new data.
   void Function(Map<String, CanvasStroke> restamped)? onRestamped;
 
+  /// Called with how many unreadable stroke entries that arrived from peers
+  /// were deleted (PNT-A0014-10), so the app can record it
+  /// (docs/spec/logging.md LOG-13).
+  void Function(int count)? onUnreadable;
+
+  /// How many unreadable stroke entries [ContentDocument.adopt] deleted,
+  /// before any [onUnreadable] could be set.
+  int get unreadableOnAdopt => _unreadableOnAdopt;
+  int _unreadableOnAdopt = 0;
+
   /// A new content document with the root keys and no strokes, committed as
   /// its first change (PNT-A0013-04).
   factory ContentDocument.create(CrdtBackend backend) {
@@ -194,6 +204,7 @@ class ContentDocument {
       content.canvas.insert(stroke);
     }
     content._deleteUnreadable(unreadable);
+    content._unreadableOnAdopt = unreadable.length;
     content._start(ready: true);
     return content;
   }
@@ -414,6 +425,7 @@ class ContentDocument {
       _applyingRemote = false;
     }
     _deleteUnreadable(unreadable);
+    if (unreadable.isNotEmpty) onUnreadable?.call(unreadable.length);
   }
 
   /// Removes [ids] through the attached controller, so panes repaint, or

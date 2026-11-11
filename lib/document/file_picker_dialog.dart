@@ -39,11 +39,17 @@ class InAppFilePicker extends StatefulWidget {
     required this.mode,
     required this.startDirectory,
     this.suggestedName = '',
+    this.onListError,
   });
 
   final FilePickerMode mode;
   final Directory startDirectory;
   final String suggestedName;
+
+  /// Told the directory and error when a directory cannot be listed, so the
+  /// caller can record it (docs/spec/logging.md LOG-13); the picker still
+  /// shows the error and stays open.
+  final void Function(String path, Object error)? onListError;
 
   /// The only file extension the picker lists and appends on save. Must match
   /// the `.paint` format extension of design/document/file-format-and-flow.md.
@@ -56,6 +62,7 @@ class InAppFilePicker extends StatefulWidget {
     required FilePickerMode mode,
     required Directory startDirectory,
     String suggestedName = '',
+    void Function(String path, Object error)? onListError,
   }) {
     return showDialog<String>(
       context: context,
@@ -63,6 +70,7 @@ class InAppFilePicker extends StatefulWidget {
         mode: mode,
         startDirectory: startDirectory,
         suggestedName: suggestedName,
+        onListError: onListError,
       ),
     );
   }
@@ -145,6 +153,7 @@ class _InAppFilePickerState extends State<InAppFilePicker> {
         _listError = null;
       });
     } catch (error) {
+      widget.onListError?.call(_currentDirectoryPath, error);
       setState(() {
         _entries = [];
         _listError = 'Could not list $_currentDirectoryPath: $error';
